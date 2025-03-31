@@ -88,7 +88,7 @@ flowchart TD
     G --> H[Base de Datos de Roles]
     H --> I[Aplica lógica de negocio]
     F --> J[Rechaza acceso]
-
+```
 
 
 ## Description
