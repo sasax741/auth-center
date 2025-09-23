@@ -6,6 +6,7 @@ import { JwtModule } from '@nestjs/jwt';
 import { JwtConfigModule } from './constants/jwt-config.module';
 import { JwtConfigService } from './constants/jwt-config.service';
 import { AuthGuard } from './guard/auth.guard';
+import { WellKnownController } from './well-known.controller';
 
 @Module({
   imports: [
@@ -15,12 +16,16 @@ import { AuthGuard } from './guard/auth.guard';
       imports: [JwtConfigModule],
       inject: [JwtConfigService],
       useFactory: async (jwtConfigService: JwtConfigService) => ({
-        secret: jwtConfigService.secret,
-        signOptions: { expiresIn: '1d' },
+        privateKey: jwtConfigService.privateKey,
+        publicKey: jwtConfigService.publicKey,
+        signOptions: { 
+          expiresIn: '1d',
+          algorithm: 'RS256',
+        },
       }),
     }),
   ],
-  controllers: [AuthController],
+  controllers: [AuthController, WellKnownController],
   providers: [AuthService, AuthGuard],
 })
 export class AuthModule {}
