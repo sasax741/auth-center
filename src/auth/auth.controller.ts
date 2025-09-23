@@ -3,7 +3,8 @@ import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { AuthGuard } from './guard/auth.guard';
-import {JwtPayload} from '../interfaces/jwt-payload.interface'
+import {JwtPayload} from '../interfaces/jwt-payload.interface';
+import { GetUser } from './decorators/get-user.decorator';
 
 @Controller('auth')
 export class AuthController {
@@ -11,6 +12,7 @@ export class AuthController {
     constructor(
         private readonly authService: AuthService,
     ){}
+
 
     @Get(':id')
     @UseGuards(AuthGuard)
@@ -44,14 +46,20 @@ export class AuthController {
     ){
         return this.authService.login(loginDto);
     }
+
+    @Post('logout')
+    @UseGuards(AuthGuard)
+    logout(@GetUser() user: JwtPayload) {
+      return this.authService.logout(user);
+    }
     
     @Delete('deleteUser/:id')
     @UseGuards(AuthGuard)
     deleteUser(
         @Param('id') id: number,
-        @Body() body:JwtPayload
+        @GetUser() user: JwtPayload
     ){
-        return this.authService.deleteUser(id, body);
+        return this.authService.deleteUser(id, user);
     }
 
 }

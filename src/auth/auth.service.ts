@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, Injectable, UnauthorizedException, Inject } from '@nestjs/common';
 import { UsersService } from 'src/users/users.service';
 import { RegisterDto } from './dto/register.dto';
 import {JwtPayload} from '../interfaces/jwt-payload.interface'
@@ -6,6 +6,9 @@ import * as bcrypt from 'bcrypt'
 import { LoginDto } from './dto/login.dto';
 import { JwtService } from '@nestjs/jwt';
 import { v4 as uuidv4 } from 'uuid';
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
+import { Cache } from 'cache-manager';
+import { JwtConfigService } from './constants/jwt-config.service';
 
 
 @Injectable()
@@ -13,8 +16,10 @@ export class AuthService {
 
 
     constructor(
+        @Inject(CACHE_MANAGER) private cacheManager: Cache,
         private readonly usersService: UsersService,
         private readonly jwtService: JwtService,
+        private readonly jwtConfigService: JwtConfigService,
     ){
     }
 
@@ -72,10 +77,12 @@ export class AuthService {
             iss: "auth waves",
             aud: user.client,
             nbf: timestamp,
-            jti: jti
+            jti: jti,
         }
 
-        const token = await this.jwtService.signAsync(payload)
+        const token = await this.jwtService.signAsync(payload, {
+            keyid: this.jwtConfigService.kid,
+        });
 
         return {
             email,
@@ -83,7 +90,18 @@ export class AuthService {
         };
     }
 
-    async deleteUser(id:number, userToken:JwtPayload){
+    async logout(user: JwtPayload) {
+        const { jti, exp } = user;
+        const ttl = exp - Math.floor(Date.now() / 1000);
+    
+        if (ttl > 0) {
+          await this.cacheManager.set(jti, 'revoked', ttl);
+        }
+    
+        return { message: 'Logout successful' };
+    }
+
+    async deleteUser(id:number, userToken: JwtPayload){
 
         const userActive = await this.getUser(id)
         

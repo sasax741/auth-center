@@ -1,11 +1,15 @@
-import { CanActivate, ExecutionContext, Injectable, UnauthorizedException } from '@nestjs/common';
+import { CanActivate, ExecutionContext, Injectable, UnauthorizedException, Inject } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { Request } from 'express';
 import { JwtConfigService } from '../constants/jwt-config.service';
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
+import { Cache } from 'cache-manager';
+import { JwtPayload } from 'src/interfaces/jwt-payload.interface';
 
 @Injectable()
 export class AuthGuard implements CanActivate {
   constructor(
+    @Inject(CACHE_MANAGER) private cacheManager: Cache,
     private readonly jwtService: JwtService,
     private readonly jwtConfigService: JwtConfigService
   ) {}
@@ -19,12 +23,19 @@ export class AuthGuard implements CanActivate {
     }
 
     try {
-      const payload = await this.jwtService.verifyAsync(token, {
-        secret: this.jwtConfigService.secret,
+      const payload: JwtPayload = await this.jwtService.verifyAsync(token, {
+        publicKey: this.jwtConfigService.publicKey,
+        algorithms: ['RS256'],
       });
-      request.body = payload;
-    } catch {
-      throw new UnauthorizedException("Unknown token error");
+
+      const isRevoked = await this.cacheManager.get(payload.jti);
+      if (isRevoked) {
+        throw new UnauthorizedException("Token has been revoked");
+      }
+
+      request['user'] = payload;
+    } catch (e) {
+      throw new UnauthorizedException(e.message || "Unknown token error");
     }
 
     return true;
