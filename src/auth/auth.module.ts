@@ -18,7 +18,7 @@ import { WellKnownController } from './well-known.controller';
       useFactory: async (jwtConfigService: JwtConfigService) => ({
         privateKey: jwtConfigService.privateKey,
         publicKey: jwtConfigService.publicKey,
-        signOptions: { 
+        signOptions: {
           expiresIn: '1d',
           algorithm: 'RS256',
         },

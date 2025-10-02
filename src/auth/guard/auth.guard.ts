@@ -1,4 +1,10 @@
-import { CanActivate, ExecutionContext, Injectable, UnauthorizedException, Inject } from '@nestjs/common';
+import {
+  CanActivate,
+  ExecutionContext,
+  Injectable,
+  UnauthorizedException,
+  Inject,
+} from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { Request } from 'express';
 import { JwtConfigService } from '../constants/jwt-config.service';
@@ -11,15 +17,15 @@ export class AuthGuard implements CanActivate {
   constructor(
     @Inject(CACHE_MANAGER) private cacheManager: Cache,
     private readonly jwtService: JwtService,
-    private readonly jwtConfigService: JwtConfigService
+    private readonly jwtConfigService: JwtConfigService,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
-    const request:Request = context.switchToHttp().getRequest<Request>();
+    const request: Request = context.switchToHttp().getRequest<Request>();
     const token = this.extractTokenFromHeader(request);
 
     if (!token) {
-      throw new UnauthorizedException("The token is non-existent");
+      throw new UnauthorizedException('The token is non-existent');
     }
 
     try {
@@ -30,12 +36,12 @@ export class AuthGuard implements CanActivate {
 
       const isRevoked = await this.cacheManager.get(payload.jti);
       if (isRevoked) {
-        throw new UnauthorizedException("Token has been revoked");
+        throw new UnauthorizedException('Token has been revoked');
       }
 
       request['user'] = payload;
     } catch (e) {
-      throw new UnauthorizedException(e.message || "Unknown token error");
+      throw new UnauthorizedException(e.message || 'Unknown token error');
     }
 
     return true;
