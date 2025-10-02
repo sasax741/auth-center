@@ -90,6 +90,45 @@ flowchart TD
     F --> J[Rechaza acceso]
 ```
 
+<br>
+
+# Arquitectura y Flujo de Validación Moderno
+
+La arquitectura de este servicio está diseñada para desacoplar la **Autenticación (AuthN)** de la **Autorización (AuthZ)**. Este microservicio se encarga exclusivamente de verificar la identidad de un usuario y emitir un token JWT firmado con **RS256** (firma asimétrica). La responsabilidad de decidir *qué puede hacer* un usuario recae en los microservicios de negocio.
+
+## Flujo de Validación Centralizado con API Gateway
+
+Para una arquitectura robusta y escalable, se recomienda centralizar la validación de tokens en un **API Gateway** (por ejemplo, Traefik, Kong, etc.) en lugar de hacerlo en cada microservicio.
+
+1.  **Recepción de la Petición:** El API Gateway es el único punto de entrada y recibe todas las peticiones de los clientes.
+2.  **Validación del Token JWT:**
+    *   El Gateway extrae el token JWT del header `Authorization`.
+    *   Obtiene la clave pública del endpoint de este servicio (`/.well-known/jwks.json`) para verificar la firma del token. Este proceso es seguro y dinámico.
+    *   Valida la firma, la expiración y otros `claims` del token.
+3.  **Enrutamiento:** Si el token es válido, el Gateway reenvía la petición al microservicio de negocio correspondiente. Opcionalmente, puede enriquecer la petición con headers como `X-User-ID`.
+
+Este enfoque libera a los servicios de negocio de la lógica de validación, reduce el acoplamiento y simplifica la gestión de la seguridad.
+
+## Trazabilidad con IDs de Correlación
+
+Para depurar y monitorear eficazmente un sistema de microservicios, es crucial implementar **IDs de Correlación**.
+
+*   **¿Qué es?:** Un identificador único (ej. un UUID) que se asigna a cada petición que entra al sistema.
+*   **¿Cómo funciona?:** El API Gateway debe generar este ID si no existe y añadirlo como un header HTTP (ej. `X-Correlation-ID`). Cada microservicio que procesa la petición debe leer este header, incluirlo en todos sus logs y **propagarlo** en cualquier llamada que haga a otros servicios.
+*   **Beneficio:** Permite rastrear el ciclo de vida completo de una petición a través de múltiples servicios, simplificando enormemente la depuración y el análisis de errores.
+
+## Endpoints Principales
+
+Todos los endpoints están prefijados con `/api/v1`.
+
+| Verbo  | Ruta                               | Descripción                                                                                                | Autenticación Requerida |
+| :----- | :--------------------------------- | :--------------------------------------------------------------------------------------------------------- | :---------------------- |
+| `POST` | `/auth/register`                   | Registra un nuevo usuario.                                                                                 | No                      |
+| `POST` | `/auth/login`                      | Autentica a un usuario y devuelve un token JWT.                                                            | No                      |
+| `POST` | `/auth/logout`                     | Invalida el token JWT actual añadiéndolo a una lista de revocación.                                         | Sí                      |
+| `GET`  | `/auth`                            | Obtiene la lista de usuarios. Sirve para validar un token: si la petición es exitosa, el token es válido.   | Sí                      |
+| `GET`  | `/.well-known/jwks.json`           | **(Ruta absoluta sin prefijo)** Expone la clave pública en formato JWKS para que clientes/gateways puedan verificar los tokens. | No                      |
+
 
 ## Description
 

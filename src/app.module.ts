@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AppController } from './app.controller';
@@ -7,9 +7,13 @@ import { UsersModule } from './users/users.module';
 import { AuthModule } from './auth/auth.module';
 import { CacheModule } from '@nestjs/cache-manager';
 import * as redisStore from 'cache-manager-redis-store';
+import { CorrelationIdMiddleware } from './middleware/correlation-id.middleware';
+import { RequestContextModule } from './request-context/request-context.module';
+import { CustomLogger } from './logger/custom-logger.service';
 
 @Module({
   imports: [
+    RequestContextModule,
     CacheModule.register({
       isGlobal: true,
       store: redisStore,
@@ -35,9 +39,13 @@ import * as redisStore from 'cache-manager-redis-store';
       }),
     }),
     UsersModule,
-    AuthModule
+    AuthModule,
   ],
   controllers: [AppController],
-  providers: [AppService],
+  providers: [AppService, CustomLogger],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer) {
+    consumer.apply(CorrelationIdMiddleware).forRoutes('*');
+  }
+}

@@ -3,6 +3,7 @@ import { AppModule } from './app.module';
 import { ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { CustomLogger } from './logger/custom-logger.service';
 /**
  * The `bootstrap` function sets up a NestJS application with global settings, validation pipes,
  * Swagger documentation in non-production environments, and listens on a specified port.
@@ -11,7 +12,9 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
-  app.setGlobalPrefix('api/v1');
+  app.useLogger(app.get(CustomLogger));
+
+  app.setGlobalPrefix('api/v1', { exclude: ['.well-known/jwks.json'] });
 
   app.useGlobalPipes(
     new ValidationPipe({
