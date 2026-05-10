@@ -4,7 +4,7 @@ import {
   UnauthorizedException,
   Inject,
 } from '@nestjs/common';
-import { UsersService } from 'src/users/users.service';
+import { UsersService } from '../users/users.service';
 import { RegisterDto } from './dto/register.dto';
 import { JwtPayload } from '../interfaces/jwt-payload.interface';
 import * as bcrypt from 'bcrypt';
@@ -14,6 +14,8 @@ import { v4 as uuidv4 } from 'uuid';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Cache } from 'cache-manager';
 import { JwtConfigService } from './constants/jwt-config.service';
+import { DataSource } from 'typeorm';
+import { User } from '../users/entities/user.entity';
 
 @Injectable()
 export class AuthService {
@@ -22,30 +24,28 @@ export class AuthService {
     private readonly usersService: UsersService,
     private readonly jwtService: JwtService,
     private readonly jwtConfigService: JwtConfigService,
+    private readonly dataSource: DataSource,
   ) {}
 
   async register({ name, lastName, email, password, client }: RegisterDto) {
-    const user = await this.usersService.findOneByEmail(email);
+    const existingUser = await this.usersService.findOneByEmail(email);
 
-    if (user) {
+    if (existingUser) {
       throw new BadRequestException('User already exists');
     }
 
-    return await this.usersService.create({
-      name,
-      lastName,
-      email,
-      password: await bcrypt.hash(password, 10),
-      client,
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    return this.dataSource.transaction(async (manager) => {
+      const user = manager.create(User, {
+        name,
+        lastName,
+        email,
+        password: hashedPassword,
+        client,
+      });
+      return manager.save(user);
     });
-  }
-
-  async getUsers() {
-    return this.usersService.findAll();
-  }
-
-  async getUser(id: number) {
-    return this.usersService.findOne(id);
   }
 
   async login({ email, password, client }: LoginDto) {
@@ -54,7 +54,7 @@ export class AuthService {
       throw new UnauthorizedException('email is wrong');
     }
 
-    if (user.daletedAt != null) {
+    if (user.deletedAt != null) {
       throw new BadRequestException('the user has already been deleted');
     }
 
@@ -101,7 +101,7 @@ export class AuthService {
   }
 
   async deleteUser(id: number, userToken: JwtPayload) {
-    const userActive = await this.getUser(id);
+    const userActive = await this.usersService.findOne(id);
 
     if (userActive == null) {
       throw new BadRequestException('the user has already been deleted');

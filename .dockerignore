@@ -1,3 +1,60 @@
-dist/*
-node_modules/*
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build output
+dist/
+
+# Environment
 .env
+.env.local
+.env.*.local
+
+# Version control
+.git/
+.gitignore
+.gitattributes
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# Test / Coverage
+test/
+coverage/
+
+# Documentation
+*.md
+README.md
+ANALISIS_ARQUITECTONICO.md
+CRUSH.md
+
+# Docker
+Dockerfile
+.dockerignore
+docker-compose*
+
+# Scripts
+build-image-prid.sh
+
+# Config
+.eslintrc.js
+.prettierrc
+nest-cli.json
+tsconfig.json
+tsconfig.build.json
+ormconfig.ts
+
+# Skills
+.agents/
+skills-lock.json

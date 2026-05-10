@@ -1,6 +1,6 @@
-import { NestFactory } from '@nestjs/core';
+import { NestFactory, Reflector } from '@nestjs/core';
 import { AppModule } from './app.module';
-import { ValidationPipe } from '@nestjs/common';
+import { ValidationPipe, ClassSerializerInterceptor } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { CustomLogger } from './logger/custom-logger.service';
@@ -14,7 +14,9 @@ async function bootstrap() {
 
   app.useLogger(app.get(CustomLogger));
 
-  app.setGlobalPrefix('api/v1', { exclude: ['.well-known/jwks.json'] });
+  app.setGlobalPrefix('api/v1', {
+    exclude: ['.well-known/jwks.json', 'health'],
+  });
 
   app.useGlobalPipes(
     new ValidationPipe({
@@ -23,6 +25,10 @@ async function bootstrap() {
       transform: true,
     }),
   );
+
+  app.useGlobalInterceptors(new ClassSerializerInterceptor(app.get(Reflector)));
+
+  app.enableShutdownHooks();
 
   const configService = app.get(ConfigService);
   const nodeEnv = configService.get<string>('NODE_ENV') || 'development';

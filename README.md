@@ -168,18 +168,15 @@ $ npm run test:cov
 
 ## ENV
 
-Para Levantar el projecto es necesario crear el ENV. Example:
+Para Levantar el proyecto es necesario crear el archivo `.env` basado en `.env.example`:
 
 ```bash
-#DATABASE
-DB_HOST=localhost
-DB_PORT=5432
-DB_USER=root
-DB_PASSWORD=password
-DB_NAME=auth
+cp .env.example .env
+```
 
-#TOKEN
-JWT_SECRET=w4v3s
+Para generar las claves RSA necesarias para JWT RS256:
 
-#APP
-PORT=3000
+```bash
+openssl genrsa -out private.pem 2048
+openssl rsa -in private.pem -pubout -out public.pem
+```
