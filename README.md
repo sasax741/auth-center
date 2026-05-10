@@ -41,7 +41,35 @@ C4Context
     UpdateLayoutConfig($c4ShapeInRow="3", $c4BoundaryInRow="1")
 ```
 
-El servicio expone un endpoint `/.well-known/jwks.json` (sin prefijo `/api/v1`) para que los microservicios de negocio obtengan la clave pública y validen tokens de forma desacoplada.
+El servicio expone un endpoint `/.well-known/jwks.json` (sin prefijo `/api/v1`) para que clientes o gateways obtengan la clave pública y validen tokens de forma desacoplada.
+
+### API Gateway (Traefik) — Validación Centralizada
+
+En producción se recomienda que un **API Gateway** (Traefik, Kong, etc.) sea el único punto de entrada y valide los tokens JWT centralizadamente:
+
+```mermaid
+flowchart LR
+    C[Client] -->|Request + Bearer JWT| GW[API Gateway<br>Traefik]
+    GW -->|GET /.well-known/jwks.json| AUTH[API Auth]
+    AUTH -->|Public Key JWKS| GW
+    GW -->|Valida firma RS256<br>exp, audience| GW
+    GW -->|Token válido| MS1[Microservicio<br>de Negocio]
+    GW -->|Token inválido| ERR[401 Unauthorized]
+    MS1 -->|sub + X-User-ID| DB[(DB Roles<br>y Permisos)]
+
+    style GW fill:#fff3bf,stroke:#e67700
+    style ERR fill:#ffc9c9,stroke:#e03131
+    style MS1 fill:#d0bfff,stroke:#6741d9
+```
+
+**Consecuencia importante:** los microservicios de negocio **no validan nada del JWT**. El gateway:
+
+1. Obtiene la clave pública del endpoint `/.well-known/jwks.json`
+2. Valida la firma RS256, expiración, audience y blacklist
+3. Si el token es inválido → responde `401` directo, el request nunca llega al microservicio
+4. Si es válido → reenvía el request con headers de confianza (`X-User-ID`, `X-User-Email`)
+
+El microservicio recibe el `X-User-ID` y solo consulta su propia base de datos de roles/permisos para autorizar la operación. Esto desacopla completamente AuthN (Gateway + API Auth) de AuthZ (cada microservicio).
 
 ---
 
