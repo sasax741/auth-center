@@ -1,182 +1,317 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="200" alt="Nest Logo" /></a>
-</p>
+# API Auth — Microservicio de Autenticación
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+Microservicio de autenticación construido con NestJS que emite tokens JWT firmados con **RS256** (firma asimétrica). Se encarga exclusivamente de **AuthN** (verificar quién es el usuario); la **AuthZ** (qué puede hacer) queda en manos de los servicios de negocio.
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://coveralls.io/github/nestjs/nest?branch=master" target="_blank"><img src="https://coveralls.io/repos/github/nestjs/nest/badge.svg?branch=master#9" alt="Coverage" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+---
 
+## Stack Tecnológico
 
-# Integración de la App de Negocio con el Microservicio de Autenticación
+| Componente   | Tecnología                                |
+|-------------|-------------------------------------------|
+| Framework   | NestJS + TypeScript                       |
+| Base de datos | PostgreSQL 16 + TypeORM (migraciones)   |
+| Cache / Blacklist | Redis 7                          |
+| JWT         | RS256 (claves RSA de 2048 bits)           |
+| Contenedores | Docker + docker-compose                  |
+| Rate Limiting | @nestjs/throttler (3 niveles)           |
+| Tracing     | Correlation ID + AsyncLocalStorage        |
 
-Esta documentación describe el flujo de integración entre el microservicio de autenticación y la aplicación de negocio. Se detalla cómo se utilizan los tokens JWT, la verificación de seguridad (incluyendo la comprobación en una lista de tokens revocados almacenada en Redis) y el manejo de roles dentro de la aplicación de negocio.
+---
 
-## Componentes Clave
+## Arquitectura
 
-- **Microservicio de Autenticación**
-  - Emite tokens JWT al registrar o iniciar sesión.
-  - Genera un payload con los siguientes campos:
-    - `aud` (Audience): Destinatario del token.
-    - `exp` (Expiration Time): Momento de expiración.
-    - `iat` (Issued At): Momento en que se emitió.
-    - `iss` (Issuer): Emisor del token.
-    - `jti` (JWT ID): Identificador único para prevenir ataques de replay.
-    - `nbf` (Not Before): Tiempo a partir del cual el token es válido.
-    - `sub` (Subject): Identificador del usuario.
+```mermaid
+C4Context
+    title System Context — API Auth
 
-- **Aplicación de Negocio (Cliente)**
-  - Recibe y utiliza el token para autenticar al usuario.
-  - Verifica:
-    - La firma y validez temporal del token (`iat`, `nbf` y `exp`).
-    - Que el token esté destinado a ella (comprobación del `aud`).
-    - Que el `jti` no figure en la lista de tokens revocados.
-  - Usa el campo `sub` para identificar al usuario y, con ello, consultar la base de datos de roles y permisos para aplicar la lógica de negocio.
+    Person(client, "Client", "Web / Mobile app que consume endpoints de auth")
 
-- **Lista de Tokens Revocados (Redis)**
-  - Se utiliza para almacenar los `jti` de los tokens que han sido revocados (por ejemplo, tras un logout o cuando se detecta uso sospechoso).
-  - La aplicación de negocio, o un microservicio dedicado, consulta Redis para confirmar que el token recibido no esté revocado.
+    System_Boundary(auth, "API Auth Service") {
+        Container(api, "NestJS App", "Node.js, TypeScript", "AuthN: register, login, logout, JWKS")
+        ContainerDb(pg, "PostgreSQL", "TypeORM", "Almacena usuarios (name, email, password hash, client)")
+        ContainerDb(redis, "Redis", "cache-manager", "Blacklist de tokens (jti revocados)")
+    }
 
-## Flujo de Integración
+    System_Ext(business, "External Microservices", "Servicios de negocio que consumen JWKS para validar tokens")
 
-1. **Autenticación y Emisión del Token**
-   - El usuario se registra o inicia sesión en el microservicio de autenticación.
-   - Se genera un token JWT que incluye los campos mencionados.
-   - El token se envía a la aplicación de negocio.
+    Rel(client, api, "HTTP /api/v1/auth/*", "HTTPS")
+    Rel(api, pg, "TypeORM", "SQL")
+    Rel(api, redis, "ioredis", "Cache protocol")
+    Rel(business, api, "GET /.well-known/jwks.json", "HTTPS")
+    UpdateLayoutConfig($c4ShapeInRow="3", $c4BoundaryInRow="1")
+```
 
-2. **Validación del Token en la App de Negocio**
-   - **Verificación de Firma y Tiempos:**
-     La app valida la firma del token, comprueba que no haya expirado (`exp`), que se encuentre dentro de la ventana de validez (`iat` y `nbf`).
-   - **Verificación del Destinatario:**
-     Se comprueba que el `aud` del token coincida con la app de negocio.
-   - **Verificación del Token Revocado:**
-     La aplicación consulta el servicio (basado en Redis) para asegurarse de que el `jti` no esté en la lista negra.
-   - **Identificación del Usuario:**
-     Se extrae el `sub` para identificar al usuario y se consulta la base de datos local para obtener sus roles y permisos.
+El servicio expone un endpoint `/.well-known/jwks.json` (sin prefijo `/api/v1`) para que los microservicios de negocio obtengan la clave pública y validen tokens de forma desacoplada.
 
-3. **Manejo de Roles y Permisos**
-   - Con el identificador del usuario (`sub`), la aplicación de negocio consulta su propia base de datos para determinar los roles asignados.
-   - Con base en los roles y permisos, la aplicación decide qué acciones puede realizar el usuario.
+---
 
-## Diagrama de Flujo
+## Endpoints
 
-El siguiente diagrama ilustra la interacción entre los componentes:
+Todos los endpoints operativos están prefijados con `/api/v1`.
+
+| Verbo   | Ruta                             | Descripción                                                                 | Auth | Rate Limit     |
+|:--------|:---------------------------------|:----------------------------------------------------------------------------|:-----|:---------------|
+| `POST`  | `/auth/register`                 | Registra un nuevo usuario                                                   | No   | 5 req/min      |
+| `POST`  | `/auth/login`                    | Autentica y devuelve un JWT RS256                                           | No   | 5 req/min      |
+| `POST`  | `/auth/logout`                   | Revoca el token actual (agrega jti a Redis blacklist)                       | Sí   | Global         |
+| `DELETE`| `/auth/deleteUser/:id`           | Soft-delete de usuario (solo el propio dueño)                               | Sí   | Global         |
+| `GET`   | `/users`                         | Lista todos los usuarios                                                    | Sí   | Global         |
+| `GET`   | `/users/:id`                     | Obtiene un usuario por ID                                                   | Sí   | Global         |
+| `GET`   | `/health`                        | Health check con ping a PostgreSQL                                          | No   | Global         |
+| `GET`   | `/.well-known/jwks.json`         | Clave pública en formato JWKS (ruta absoluta, sin prefijo)                  | No   | Global         |
+
+---
+
+## Flujos de Autenticación
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant API as API Auth (NestJS)
+    participant PG as PostgreSQL
+    participant R as Redis
+
+    Note over C,R: REGISTER
+    C->>API: POST /api/v1/auth/register
+    API->>API: Validar DTO (name, email, password, client)
+    API->>PG: Verificar email único
+    API->>API: Hash password (bcrypt, 10 rounds)
+    API->>PG: INSERT user (transaction)
+    PG-->>API: User saved
+    API-->>C: 201 { id, name, email, client }
+
+    Note over C,R: LOGIN
+    C->>API: POST /api/v1/auth/login
+    API->>PG: Buscar usuario por email
+    PG-->>API: User data (password hash)
+    API->>API: Comparar bcrypt hash
+    API->>API: Firmar JWT RS256 { sub, aud, jti, iss, exp, nbf }
+    API-->>C: 200 { email, token }
+
+    Note over C,R: LOGOUT
+    C->>API: POST /api/v1/auth/logout (Bearer JWT)
+    API->>API: AuthGuard — verificar firma JWT
+    API->>API: Extraer jti + exp del payload
+    API->>R: SET jti → "revoked" (TTL = exp - now)
+    R-->>API: OK
+    API-->>C: 200 { message: "Logout successful" }
+```
+
+### Payload del JWT
+
+| Claim | Descripción                                |
+|:------|:-------------------------------------------|
+| `sub` | ID del usuario                             |
+| `aud` | Cliente destino (multi-tenant)             |
+| `iss` | `"auth waves"`                             |
+| `jti` | UUID único — previene replay attacks       |
+| `iat` | Emitido en                                |
+| `nbf` | Válido desde                              |
+| `exp` | Expira en (1 día por defecto)              |
+
+---
+
+## Validación de Tokens
+
+El `AuthGuard` se ejecuta en los endpoints protegidos. El flujo de validación es:
 
 ```mermaid
 flowchart TD
-    A[Usuario] -->|Se registra/inicia sesión| B(Microservicio de Autenticación)
-    B -->|Emite JWT con payload: aud, exp, iat, iss, jti, nbf, sub| C(App de Negocio)
-    C --> D{Valida Token}
-    D -->|Verifica firma, tiempos, aud y Consulta Redis: lista negra jti| E[Token Válido]
-    D --> F[Token Revocado]
-    E --> G[Extrae sub y consulta roles]
-    G --> H[Base de Datos de Roles]
-    H --> I[Aplica lógica de negocio]
-    F --> J[Rechaza acceso]
+    Start([Request con Bearer token]) --> Extract[Extraer JWT del<br>header Authorization]
+    Extract --> Verify{Verificar firma<br>JWT con RS256?}
+    Verify -->|Clave pública<br>+ algoritmo RS256| Expired{Token<br>expirado?}
+    Expired -->|Sí| DenyExp[401 Unauthorized<br>Token expirado]
+    Expired -->|No| Blacklist{Consultar Redis:<br>jti en blacklist?}
+
+    Blacklist -->|jti encontrado| DenyRev[401 Unauthorized<br>Token revocado]
+    Blacklist -->|jti no encontrado| Allow[Permitir request<br>→ Controller]
+
+    DenyExp --> Response[Respuesta JSON error]
+    DenyRev --> Response
+
+    style Allow fill:#b2f2bb,stroke:#2f9e44,color:#2f9e44
+    style DenyExp fill:#ffc9c9,stroke:#e03131,color:#e03131
+    style DenyRev fill:#ffc9c9,stroke:#e03131,color:#e03131
+    style Verify fill:#ffec99,stroke:#e67700,color:#e67700
+    style Expired fill:#ffec99,stroke:#e67700,color:#e67700
+    style Blacklist fill:#ffec99,stroke:#e67700,color:#e67700
 ```
 
-<br>
+---
 
-# Arquitectura y Flujo de Validación Moderno
+## JWT RS256 (Firma Asimétrica)
 
-La arquitectura de este servicio está diseñada para desacoplar la **Autenticación (AuthN)** de la **Autorización (AuthZ)**. Este microservicio se encarga exclusivamente de verificar la identidad de un usuario y emitir un token JWT firmado con **RS256** (firma asimétrica). La responsabilidad de decidir *qué puede hacer* un usuario recae en los microservicios de negocio.
+Se usa RS256 en lugar de HS256 (simétrica) por las siguientes ventajas:
 
-## Flujo de Validación Centralizado con API Gateway
+- La **clave privada** solo está en este servicio (firma tokens)
+- La **clave pública** se distribuye segura vía JWKS (cualquier servicio verifica)
+- Los servicios de negocio no necesitan compartir un secreto con el auth service
+- Rotación de claves posible sin coordinación entre servicios
 
-Para una arquitectura robusta y escalable, se recomienda centralizar la validación de tokens en un **API Gateway** (por ejemplo, Traefik, Kong, etc.) en lugar de hacerlo en cada microservicio.
-
-1.  **Recepción de la Petición:** El API Gateway es el único punto de entrada y recibe todas las peticiones de los clientes.
-2.  **Validación del Token JWT:**
-    *   El Gateway extrae el token JWT del header `Authorization`.
-    *   Obtiene la clave pública del endpoint de este servicio (`/.well-known/jwks.json`) para verificar la firma del token. Este proceso es seguro y dinámico.
-    *   Valida la firma, la expiración y otros `claims` del token.
-3.  **Enrutamiento:** Si el token es válido, el Gateway reenvía la petición al microservicio de negocio correspondiente. Opcionalmente, puede enriquecer la petición con headers como `X-User-ID`.
-
-Este enfoque libera a los servicios de negocio de la lógica de validación, reduce el acoplamiento y simplifica la gestión de la seguridad.
-
-## Trazabilidad con IDs de Correlación
-
-Para depurar y monitorear eficazmente un sistema de microservicios, es crucial implementar **IDs de Correlación**.
-
-*   **¿Qué es?:** Un identificador único (ej. un UUID) que se asigna a cada petición que entra al sistema.
-*   **¿Cómo funciona?:** El API Gateway debe generar este ID si no existe y añadirlo como un header HTTP (ej. `X-Correlation-ID`). Cada microservicio que procesa la petición debe leer este header, incluirlo en todos sus logs y **propagarlo** en cualquier llamada que haga a otros servicios.
-*   **Beneficio:** Permite rastrear el ciclo de vida completo de una petición a través de múltiples servicios, simplificando enormemente la depuración y el análisis de errores.
-
-## Endpoints Principales
-
-Todos los endpoints están prefijados con `/api/v1`.
-
-| Verbo  | Ruta                               | Descripción                                                                                                | Autenticación Requerida |
-| :----- | :--------------------------------- | :--------------------------------------------------------------------------------------------------------- | :---------------------- |
-| `POST` | `/auth/register`                   | Registra un nuevo usuario.                                                                                 | No                      |
-| `POST` | `/auth/login`                      | Autentica a un usuario y devuelve un token JWT.                                                            | No                      |
-| `POST` | `/auth/logout`                     | Invalida el token JWT actual añadiéndolo a una lista de revocación.                                         | Sí                      |
-| `GET`  | `/auth`                            | Obtiene la lista de usuarios. Sirve para validar un token: si la petición es exitosa, el token es válido.   | Sí                      |
-| `GET`  | `/.well-known/jwks.json`           | **(Ruta absoluta sin prefijo)** Expone la clave pública en formato JWKS para que clientes/gateways puedan verificar los tokens. | No                      |
-
-
-## Description
-
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
-
-## Installation
-
-```bash
-$ npm install
-```
-
-## Running the app
-
-```bash
-# development
-$ npm run start
-
-# watch mode
-$ npm run start:dev
-
-# production mode
-$ npm run start:prod
-```
-
-## Test
-
-```bash
-# unit tests
-$ npm run test
-
-# e2e tests
-$ npm run test:e2e
-
-# test coverage
-$ npm run test:cov
-```
-
-## ENV
-
-Para Levantar el proyecto es necesario crear el archivo `.env` basado en `.env.example`:
-
-```bash
-cp .env.example .env
-```
-
-Para generar las claves RSA necesarias para JWT RS256:
+Para generar las claves:
 
 ```bash
 openssl genrsa -out private.pem 2048
 openssl rsa -in private.pem -pubout -out public.pem
+```
+
+Luego copiar el contenido de cada archivo a las variables `JWT_PRIVATE_KEY` y `JWT_PUBLIC_KEY` del `.env`.
+
+---
+
+## IDs de Correlación
+
+Cada request recibe un `X-Correlation-ID` (UUID v4). Si el cliente no lo envía, el middleware lo genera automáticamente.
+
+- **Middleware**: `CorrelationIdMiddleware` — captura/genera el ID y lo almacena en `AsyncLocalStorage`
+- **Logger**: `CustomLogger` — todos los logs incluyen el correlation ID
+- **Interceptor**: `LoggingInterceptor` — logea `{method} {url} {statusCode} {duration}ms`
+
+Esto permite rastrear una petición completa a través de múltiples servicios en la traza.
+
+---
+
+## Rate Limiting
+
+Tres niveles configurados globalmente:
+
+| Nivel    | Límite              | Ventana |
+|:---------|:--------------------|:--------|
+| short    | 3 requests          | 1s      |
+| medium   | 20 requests         | 10s     |
+| long     | 100 requests        | 60s     |
+
+Los endpoints `register` y `login` tienen un override específico: **5 requests por minuto**.
+
+---
+
+## Quick Start
+
+### 1. Docker Compose (recomendado)
+
+```bash
+# Clonar e iniciar
+git clone <repo-url> && cd api-auth
+cp .env.example .env
+
+# Generar claves RSA y pegarlas en .env
+openssl genrsa -out private.pem 2048
+openssl rsa -in private.pem -pubout -out public.pem
+# Copiar contenido de private.pem a JWT_PRIVATE_KEY y public.pem a JWT_PUBLIC_KEY
+
+# Levantar todo (PostgreSQL + Redis + API)
+docker-compose up -d
+```
+
+El entrypoint de Docker corre las migraciones automáticamente antes de iniciar la app.
+
+### 2. Manual (desarrollo local)
+
+```bash
+# Variables de entorno
+cp .env.example .env
+# Configurar DB_HOST=localhost, REDIS_HOST=localhost y las claves RSA
+
+# Dependencias
+npm install
+
+# Migraciones (requiere PostgreSQL corriendo)
+npx ts-node datasource.ts
+npx typeorm-ts-node-commonjs migration:run --dataSource datasource.ts
+
+# Iniciar
+npm run start:dev
+```
+
+### Variables de Entorno
+
+```env
+# Base de datos
+DB_HOST=localhost
+DB_PORT=5432
+DB_USER=root
+DB_PASSWORD=password
+DB_NAME=auth
+
+# JWT RS256 (contenido PEM completo)
+JWT_PRIVATE_KEY=-----BEGIN RSA PRIVATE KEY-----
+JWT_PUBLIC_KEY=-----BEGIN PUBLIC KEY-----
+JWT_KID=my-key-id
+
+# Redis
+REDIS_HOST=localhost
+REDIS_PORT=6379
+
+# App
+PORT=3000
+NODE_ENV=development
+```
+
+---
+
+## Estructura del Proyecto
+
+```
+src/
+├── auth/                  # Módulo de autenticación
+│   ├── auth.controller.ts    # register, login, logout, deleteUser
+│   ├── auth.service.ts       # Lógica de negocio + transacciones
+│   ├── well-known.controller.ts  # GET /.well-known/jwks.json
+│   ├── guard/auth.guard.ts   # Validación JWT + blacklist Redis
+│   ├── decorators/           # @GetUser() decorator
+│   ├── dto/                  # register.dto, login.dto
+│   └── constants/            # JwtConfigService (carga claves PEM)
+├── users/                 # Módulo de usuarios
+│   ├── users.controller.ts   # CRUD protegido
+│   ├── users.service.ts      # find, remove (soft-delete)
+│   └── entities/user.entity.ts  # TypeORM entity
+├── migrations/            # Migraciones TypeORM
+│   ├── 1758608433133-InitialSchema.ts
+│   └── 1758608433134-FixDaletedAtTypo.ts
+├── middleware/             # CorrelationIdMiddleware
+├── request-context/       # AsyncLocalStorage wrapper
+├── logger/                # CustomLogger con correlation ID
+├── interceptors/          # LoggingInterceptor
+├── filters/               # AllExceptionsFilter (global)
+├── health/                # HealthController (Terminus)
+└── interfaces/            # JwtPayload interface
+```
+
+---
+
+## Decisiones Técnicas
+
+| Decisión                     | Alternativa       | Por qué                                                                 |
+|:-----------------------------|:------------------|:------------------------------------------------------------------------|
+| **RS256** (asimétrico)       | HS256 (simétrico) | Los servicios de negocio verifican sin compartir secreto; rotación de claves posible vía JWKS |
+| **AuthN separado de AuthZ**  | Todo en uno       | Este servicio solo identifica; permisos y roles son dominio del negocio |
+| **TypeORM migraciones**      | `synchronize: true` | Control de cambios en DB, rollbacks, revisión en código                |
+| **AsyncLocalStorage**        | Request-scoped DI | Contexto implícito sin acoplar firmas de métodos                        |
+| **Redis blacklist (jti)**    | Blacklist en DB   | O(1) en memoria, TTL automático, no satura la DB                        |
+| **cache-manager**            | ioredis directo   | Abstracción intercambiable (Redis → Memcached sin cambiar código)       |
+
+---
+
+## Tests
+
+```bash
+# Tests unitarios
+npm run test
+
+# Tests e2e
+npm run test:e2e
+
+# Cobertura
+npm run test:cov
+```
+
+---
+
+## Despliegue
+
+El `Dockerfile` usa build multi-stage con `pnpm` para minimizar la imagen final. El `docker-entrypoint.sh` ejecuta las migraciones antes de iniciar la app.
+
+```bash
+# Build manual
+docker build -t api-auth .
 ```
