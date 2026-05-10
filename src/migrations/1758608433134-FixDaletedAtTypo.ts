@@ -1,7 +1,7 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-export class FixDaletedAtTypo1700000000001 implements MigrationInterface {
-  name = 'FixDaletedAtTypo1700000000001';
+export class FixDaletedAtTypo1758608433134 implements MigrationInterface {
+  name = 'FixDaletedAtTypo1758608433134';
 
   public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(

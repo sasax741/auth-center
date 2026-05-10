@@ -1,8 +1,8 @@
 # --------------- Stage 1: Build ---------------
 FROM node:20-alpine AS builder
 
-# Enable pnpm via corepack
-RUN corepack enable && corepack prepare pnpm@latest --activate
+# Enable pnpm via corepack (pnpm@9 for Node.js 20 compatibility)
+RUN corepack enable && corepack prepare pnpm@9 --activate
 
 WORKDIR /app
 
@@ -33,21 +33,15 @@ WORKDIR /app
 # Copy package files for production install
 COPY package.json pnpm-lock.yaml ./
 
-# Install production dependencies only
-RUN corepack enable && corepack prepare pnpm@latest --activate && \
+# Install production dependencies only (pnpm@9 for Node.js 20 compatibility)
+RUN corepack enable && corepack prepare pnpm@9 --activate && \
     pnpm install --prod --frozen-lockfile
 
-# Copy built artifacts
+# Copy built artifacts and entrypoint
 COPY --from=builder /app/dist ./dist
+COPY docker-entrypoint.sh /app/docker-entrypoint.sh
 
-# Create entrypoint script for migrations
-RUN echo '#!/bin/sh\n\
-set -e\n\
-echo "Running database migrations..."\n\
-node ./node_modules/typeorm/cli.js migration:run --dataSource dist/datasource.js\n\
-echo "Migrations complete. Starting application..."\n\
-exec node dist/main' > /app/docker-entrypoint.sh && \
-    chmod +x /app/docker-entrypoint.sh && \
+RUN chmod +x /app/docker-entrypoint.sh && \
     chown -R appuser:appgroup /app
 
 # Switch to non-root user

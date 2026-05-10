@@ -60,3 +60,6 @@ yarn.lock
 
 .agents
 skills-lock.json
+
+# Setup/test scripts
+/scripts/

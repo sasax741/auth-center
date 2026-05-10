@@ -30,7 +30,6 @@ Thumbs.db
 npm-debug.log*
 
 # Test / Coverage
-test/
 coverage/
 
 # Documentation
@@ -43,17 +42,6 @@ CRUSH.md
 Dockerfile
 .dockerignore
 docker-compose*
-
-# Scripts
-build-image-prid.sh
-
-# Config
-.eslintrc.js
-.prettierrc
-nest-cli.json
-tsconfig.json
-tsconfig.build.json
-ormconfig.ts
 
 # Skills
 .agents/

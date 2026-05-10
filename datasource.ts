@@ -13,12 +13,10 @@ export default new DataSource({
     password: process.env.DB_PASSWORD,
     database: process.env.DB_NAME,
     entities: [
-        path.join(process.cwd(), 'src', '**', '*.entity.ts'),
-        path.join(process.cwd(), 'dist', '**', '*.entity.js'),
+        path.join(process.cwd(), 'dist', 'src', '**', '*.entity.js'),
     ],
     migrations: [
-        path.join(process.cwd(), 'src', 'migrations', '*.ts'),
-        path.join(process.cwd(), 'dist', 'migrations', '*.js'),
+        path.join(process.cwd(), 'dist', 'src', 'migrations', '*.js'),
     ],
     synchronize: false,
 });
