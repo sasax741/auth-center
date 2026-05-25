@@ -5,6 +5,9 @@ import { JwtService } from '@nestjs/jwt';
 import { JwtConfigService } from './constants/jwt-config.service';
 import { DataSource } from 'typeorm';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
+import { MailClientService } from '../mail/mail-client.service';
+import { HttpService } from '@nestjs/axios';
+import { ConfigService } from '@nestjs/config';
 
 describe('AuthService', () => {
   let service: AuthService;
@@ -32,11 +35,31 @@ describe('AuthService', () => {
         },
         {
           provide: DataSource,
-          useValue: { transaction: jest.fn() },
+          useValue: {
+            transaction: jest.fn(),
+            getRepository: jest.fn(() => ({
+              save: jest.fn(),
+            })),
+          },
         },
         {
           provide: CACHE_MANAGER,
-          useValue: { get: jest.fn(), set: jest.fn() },
+          useValue: { get: jest.fn(), set: jest.fn(), del: jest.fn() },
+        },
+        {
+          provide: MailClientService,
+          useValue: {
+            sendPasswordResetEmail: jest.fn(),
+            sendVerificationEmail: jest.fn(),
+          },
+        },
+        {
+          provide: HttpService,
+          useValue: { post: jest.fn() },
+        },
+        {
+          provide: ConfigService,
+          useValue: { get: jest.fn() },
         },
       ],
     }).compile();

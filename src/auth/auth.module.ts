@@ -7,11 +7,15 @@ import { JwtConfigModule } from './constants/jwt-config.module';
 import { JwtConfigService } from './constants/jwt-config.service';
 import { AuthGuard } from './guard/auth.guard';
 import { WellKnownController } from './well-known.controller';
+import { MailClientModule } from '../mail/mail-client.module';
+import { HttpModule } from '@nestjs/axios';
 
 @Module({
   imports: [
     UsersModule,
     JwtConfigModule,
+    MailClientModule,
+    HttpModule,
     JwtModule.registerAsync({
       imports: [JwtConfigModule],
       inject: [JwtConfigService],

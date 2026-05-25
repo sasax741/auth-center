@@ -1,5 +1,5 @@
 import { Transform } from 'class-transformer';
-import { IsString, IsEmail, MinLength } from 'class-validator';
+import { IsString, IsEmail, MinLength, IsOptional } from 'class-validator';
 
 export class RegisterDto {
   @Transform(({ value }) => value.trim())
@@ -24,4 +24,9 @@ export class RegisterDto {
   @MinLength(1)
   @Transform(({ value }) => value.trim())
   client: string;
+
+  @IsOptional()
+  @IsString()
+  @MinLength(1)
+  callback_url?: string;
 }

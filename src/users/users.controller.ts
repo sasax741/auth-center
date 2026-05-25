@@ -1,4 +1,4 @@
-import { Controller, Get, Param, UseGuards } from '@nestjs/common';
+import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common';
 import { UsersService } from './users.service';
 import { AuthGuard } from '../auth/guard/auth.guard';
 
@@ -8,8 +8,11 @@ export class UsersController {
 
   @Get()
   @UseGuards(AuthGuard)
-  findAll() {
-    return this.usersService.findAll();
+  findAll(@Query('page') page?: string, @Query('limit') limit?: string) {
+    return this.usersService.findAll(
+      page ? +page : undefined,
+      limit ? +limit : undefined,
+    );
   }
 
   @Get(':id')

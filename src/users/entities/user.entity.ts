@@ -24,9 +24,12 @@ export class User {
   })
   email: string;
 
-  @Column({ nullable: false })
+  @Column({ nullable: true })
   @Exclude()
-  password: string;
+  password: string | null;
+
+  @Column({ default: 'local' })
+  provider: string;
 
   @Column()
   client: string;
@@ -36,4 +39,7 @@ export class User {
 
   @DeleteDateColumn()
   deletedAt: Date;
+
+  @Column({ nullable: true, type: 'timestamp' })
+  emailVerifiedAt: Date | null;
 }

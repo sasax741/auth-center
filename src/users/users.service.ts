@@ -19,8 +19,11 @@ export class UsersService {
     return this.userRepository.findOneBy({ email });
   }
 
-  findAll() {
-    return this.userRepository.find();
+  findAll(page = 1, limit = 10) {
+    return this.userRepository.find({
+      skip: (page - 1) * limit,
+      take: limit,
+    });
   }
 
   findOne(id: number) {

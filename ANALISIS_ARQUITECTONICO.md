@@ -20,6 +20,15 @@ Sin embargo, para evolucionar de un prototipo funcional a una solución robusta,
     1.  Modificar el servicio de autenticación para firmar los JWT con RS256.
     2.  Exponer un endpoint público estándar, como `/.well-known/jwks.json`, que permita a los servicios consumidores obtener la clave pública de forma dinámica y segura. Esto elimina la necesidad de compartir secretos.
 
+### 2.1.1. Autenticación Federada con Google OAuth
+
+*   **Implementado:** El servicio soporta login con cuenta de Google mediante Authorization Code flow. El frontend obtiene el `code` de Google y lo envía a `POST /api/v1/auth/google`. El backend intercambia el code por `id_token` server-side (usando `client_secret`), valida el email, y **crea automáticamente el usuario si no existe** (provider=`'google'`, email verificado automáticamente, sin password).
+*   **Modelo de datos:** Se agregó columna `provider` (`'local'` | `'google'`) y `password` se hizo nullable para soportar ambos métodos de autenticación.
+*   **Protecciones:**
+    *   Usuarios de Google no pueden hacer login con password (`POST /auth/login`)
+    *   Usuarios de Google no pueden resetear password (`POST /auth/forgot-password`)
+    *   Usuarios locales no pueden hacer login con Google
+
 ### 2.2. Centralización de la Lógica de Validación de Tokens
 
 *   **Situación Actual:** La responsabilidad de validar el token (firma, expiración, `audience` y consulta a la lista de revocación en Redis) recae en cada microservicio cliente. Este patrón genera un **alto acoplamiento** y dificulta el mantenimiento, ya que cualquier cambio en la lógica de validación (ej. cambiar Redis por otro sistema) requeriría modificar todos los servicios.

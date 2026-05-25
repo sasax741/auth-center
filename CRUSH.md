@@ -75,3 +75,21 @@ El proyecto ha sido actualizado con todas estas mejoras y correcciones.
 
 **Tareas Pendientes (Infraestructura):**
 *   Configurar el API Gateway (Traefik) para que utilice el endpoint JWKS y centralice la validación de tokens.
+
+---
+## Resumen de la Sesión Actual (25/05/2026)
+
+Hemos implementado **autenticación federada con Google OAuth**.
+
+**Logros Clave:**
+*   **Migración de base de datos:** `1758608433135-AddProviderAndNullablePassword` — columna `password` → nullable, nueva columna `provider` con default `'local'`.
+*   **Nuevo endpoint `POST /api/v1/auth/google`:** recibe `{ code, client }`, intercambia el código por `id_token` server-side con Google, extrae `email`/`given_name`/`family_name`, y crea el usuario automáticamente si no existe (`provider='google'`, `emailVerifiedAt=now()`, `password=NULL`).
+*   **Modelo `User`:** campo `provider: string` (`'local'` | `'google'`), `password` nullable.
+*   **Protecciones:**
+    *   `login()` rechaza usuarios con `provider !== 'local'`
+    *   `forgotPassword()` devuelve mensaje genérico para usuarios Google
+    *   `googleLogin()` rechaza usuarios con `provider === 'local'`
+*   **DTO:** `GoogleLoginDto` con `code` + `client`.
+*   **Configuración:** `GOOGLE_CLIENT_ID` y `GOOGLE_CLIENT_SECRET` en `.env.example`.
+*   **Documentación:** README.md actualizado con tabla de endpoints, sección Google OAuth, flujo completo y restricciones. ANALISIS_ARQUITECTONICO.md actualizado con sección 2.1.1.
+*   **Tests:** actualizados con mocks de `HttpService` y `ConfigService`. Todos los tests pasan.
