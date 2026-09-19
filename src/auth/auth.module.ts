@@ -15,7 +15,10 @@ import { HttpModule } from '@nestjs/axios';
     UsersModule,
     JwtConfigModule,
     MailClientModule,
-    HttpModule,
+    HttpModule.register({
+      timeout: 5000,
+      maxRedirects: 3,
+    }),
     JwtModule.registerAsync({
       imports: [JwtConfigModule],
       inject: [JwtConfigService],

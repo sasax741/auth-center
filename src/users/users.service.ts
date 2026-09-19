@@ -19,15 +19,19 @@ export class UsersService {
     return this.userRepository.findOneBy({ email });
   }
 
-  findAll(page = 1, limit = 10) {
+  findAll(client: string, page = 1, limit = 10) {
     return this.userRepository.find({
+      where: { client },
       skip: (page - 1) * limit,
       take: limit,
     });
   }
 
-  findOne(id: number) {
-    return this.userRepository.findOneBy({ id });
+  findOne(id: number, client?: string) {
+    if (client === undefined) {
+      return this.userRepository.findOneBy({ id });
+    }
+    return this.userRepository.findOneBy({ id, client });
   }
 
   remove(id: number) {

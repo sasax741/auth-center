@@ -34,7 +34,7 @@ export class AuthGuard implements CanActivate {
         algorithms: ['RS256'],
       });
 
-      const isRevoked = await this.cacheManager.get(payload.jti);
+      const isRevoked = await this.cacheManager.get(`revoked:${payload.jti}`);
       if (isRevoked) {
         throw new UnauthorizedException('Token has been revoked');
       }

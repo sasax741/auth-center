@@ -1,5 +1,7 @@
 import {
   BadRequestException,
+  ConflictException,
+  ForbiddenException,
   HttpException,
   HttpStatus,
   Injectable,
@@ -23,6 +25,7 @@ import { MailClientService } from '../mail/mail-client.service';
 import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
 import { firstValueFrom } from 'rxjs';
+import { OAuth2Client } from 'google-auth-library';
 
 @Injectable()
 export class AuthService {
@@ -37,28 +40,45 @@ export class AuthService {
     private readonly configService: ConfigService,
   ) {}
 
+  private assertAllowedClient(client: string): void {
+    const allowed = (this.configService.get<string>('ALLOWED_CLIENTS') ?? '')
+      .split(',')
+      .map((value) => value.trim())
+      .filter(Boolean);
+
+    if (allowed.length > 0 && !allowed.includes(client)) {
+      throw new UnauthorizedException('Invalid credentials');
+    }
+  }
+
   async register(
     { name, lastName, email, password, client }: RegisterDto,
     callbackUrl?: string,
   ) {
+    this.assertAllowedClient(client);
+
     const existingUser = await this.usersService.findOneByEmail(email);
 
     if (existingUser) {
-      throw new BadRequestException('User already exists');
+      throw new ConflictException('User already exists');
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    const user = await this.dataSource.transaction(async (manager) => {
-      const newUser = manager.create(User, {
+    const user = await this.usersService
+      .create({
         name,
         lastName,
         email,
         password: hashedPassword,
         client,
+      })
+      .catch((error) => {
+        if (error?.code === '23505' || error?.driverError?.code === '23505') {
+          throw new ConflictException('User already exists');
+        }
+        throw error;
       });
-      return manager.save(newUser);
-    });
 
     const verifyToken = uuidv4();
     await this.cacheManager.set(`verify_token:${verifyToken}`, email, 86400);
@@ -77,6 +97,8 @@ export class AuthService {
   }
 
   async login({ email, password, client }: LoginDto) {
+    this.assertAllowedClient(client);
+
     const user = await this.usersService.findOneByEmail(email);
     if (!user) {
       throw new UnauthorizedException('Invalid credentials');
@@ -186,7 +208,7 @@ export class AuthService {
     const ttl = exp - Math.floor(Date.now() / 1000);
 
     if (ttl > 0) {
-      await this.cacheManager.set(jti, 'revoked', ttl);
+      await this.cacheManager.set(`revoked:${jti}`, 'revoked', ttl);
     }
 
     return { message: 'Logout successful' };
@@ -199,10 +221,10 @@ export class AuthService {
       throw new BadRequestException('the user has already been deleted');
     }
     if (userActive.client != userToken.aud) {
-      throw new BadRequestException('unauthorized user for this client');
+      throw new ForbiddenException('unauthorized user for this client');
     }
     if (userActive.id != userToken.sub) {
-      throw new BadRequestException('unauthorized token for this user');
+      throw new ForbiddenException('unauthorized token for this user');
     }
 
     return this.usersService.remove(id);
@@ -296,6 +318,10 @@ export class AuthService {
       throw new BadRequestException('Invalid or expired reset token');
     }
 
+    if (user.provider !== 'local') {
+      throw new BadRequestException('Invalid or expired reset token');
+    }
+
     const hashedPassword = await bcrypt.hash(newPassword, 10);
     user.password = hashedPassword;
     await this.dataSource.getRepository(User).save(user);
@@ -306,6 +332,8 @@ export class AuthService {
   }
 
   async googleLogin({ code, client }: { code: string; client: string }) {
+    this.assertAllowedClient(client);
+
     const tokenResponse = await firstValueFrom(
       this.httpService.post('https://oauth2.googleapis.com/token', {
         code,
@@ -321,16 +349,30 @@ export class AuthService {
       throw new BadRequestException('Failed to exchange code for token');
     }
 
-    const payload = JSON.parse(
-      Buffer.from(id_token.split('.')[1], 'base64').toString(),
-    );
+    const googleClientId = this.configService.get<string>('GOOGLE_CLIENT_ID');
+    const oauthClient = new OAuth2Client(googleClientId);
+    let googleEmail: string | undefined;
+    let givenName = '';
+    let familyName = '';
 
-    const { email, given_name, family_name } = payload;
-    if (!email) {
+    try {
+      const ticket = await oauthClient.verifyIdToken({
+        idToken: id_token,
+        audience: googleClientId,
+      });
+      const googlePayload = ticket.getPayload();
+      googleEmail = googlePayload?.email;
+      givenName = googlePayload?.given_name ?? '';
+      familyName = googlePayload?.family_name ?? '';
+    } catch {
+      throw new BadRequestException('Invalid Google identity token');
+    }
+
+    if (!googleEmail) {
       throw new BadRequestException('Email not provided by Google');
     }
 
-    let user = await this.usersService.findOneByEmail(email);
+    let user = await this.usersService.findOneByEmail(googleEmail);
 
     if (user) {
       if (user.provider !== 'google') {
@@ -342,17 +384,14 @@ export class AuthService {
         throw new BadRequestException('The user has already been deleted');
       }
     } else {
-      user = await this.dataSource.transaction(async (manager) => {
-        const newUser = manager.create(User, {
-          name: given_name || '',
-          lastName: family_name || '',
-          email,
-          password: null,
-          client,
-          provider: 'google',
-          emailVerifiedAt: new Date(),
-        });
-        return manager.save(newUser);
+      user = await this.usersService.create({
+        name: givenName || '',
+        lastName: familyName || '',
+        email: googleEmail,
+        password: null,
+        client,
+        provider: 'google',
+        emailVerifiedAt: new Date(),
       });
     }
 

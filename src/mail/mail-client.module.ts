@@ -3,7 +3,12 @@ import { HttpModule } from '@nestjs/axios';
 import { MailClientService } from './mail-client.service';
 
 @Module({
-  imports: [HttpModule],
+  imports: [
+    HttpModule.register({
+      timeout: 5000,
+      maxRedirects: 3,
+    }),
+  ],
   providers: [MailClientService],
   exports: [MailClientService],
 })
