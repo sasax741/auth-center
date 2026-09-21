@@ -1,5 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication } from '@nestjs/common';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Cache } from 'cache-manager';
 import { DataSource } from 'typeorm';
@@ -56,7 +57,9 @@ describe('Authentication service (e2e)', () => {
       })
       .compile();
 
-    app = moduleFixture.createNestApplication();
+    app = moduleFixture.createNestApplication<NestExpressApplication>({
+      bodyParser: false,
+    });
     configureApp(app);
     await app.init();
 
@@ -93,6 +96,27 @@ describe('Authentication service (e2e)', () => {
       expect.objectContaining({ kty: 'RSA', alg: 'RS256', use: 'sig' }),
     );
     expect(JSON.stringify(response.body)).not.toContain('PRIVATE');
+  });
+
+  it('sets hardening headers and hides the framework fingerprint', async () => {
+    const response = await api().get('/health').expect(200);
+
+    expect(response.headers['x-content-type-options']).toBe('nosniff');
+    expect(response.headers['x-frame-options']).toBe('SAMEORIGIN');
+    expect(response.headers['x-powered-by']).toBeUndefined();
+    expect(response.headers['strict-transport-security']).toBeDefined();
+  });
+
+  it('rejects a body over the configured size limit', async () => {
+    await api()
+      .post(`/${GLOBAL_PREFIX}/auth/login`)
+      .send({
+        email: webEmail,
+        password,
+        client: 'web',
+        padding: 'x'.repeat(120 * 1024),
+      })
+      .expect(413);
   });
 
   it('registers a user without echoing the password hash', async () => {
