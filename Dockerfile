@@ -15,11 +15,8 @@ RUN pnpm install --frozen-lockfile
 # Copy source code
 COPY . .
 
-# Build the application
+# Build the application (emits dist/src plus dist/datasource.js for migrations)
 RUN pnpm run build
-
-# Compile datasource.ts separately (it's outside src/)
-RUN npx tsc datasource.ts --outDir dist --module commonjs --esModuleInterop --experimentalDecorators --emitDecoratorMetadata --target es2021 --skipLibCheck
 
 # --------------- Stage 2: Production ---------------
 FROM node:20-alpine
