@@ -377,6 +377,7 @@ export class AuthService {
     const googleClientId = this.configService.get<string>('GOOGLE_CLIENT_ID');
     const oauthClient = new OAuth2Client(googleClientId);
     let googleEmail: string | undefined;
+    let googleEmailVerified = false;
     let givenName = '';
     let familyName = '';
 
@@ -387,6 +388,7 @@ export class AuthService {
       });
       const googlePayload = ticket.getPayload();
       googleEmail = googlePayload?.email;
+      googleEmailVerified = googlePayload?.email_verified === true;
       givenName = googlePayload?.given_name ?? '';
       familyName = googlePayload?.family_name ?? '';
     } catch {
@@ -395,6 +397,10 @@ export class AuthService {
 
     if (!googleEmail) {
       throw new BadRequestException('Email not provided by Google');
+    }
+
+    if (!googleEmailVerified) {
+      throw new BadRequestException('Google account email is not verified');
     }
 
     let user = await this.usersService.findOneByEmail(googleEmail);

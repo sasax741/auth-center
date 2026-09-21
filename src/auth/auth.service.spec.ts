@@ -493,6 +493,7 @@ describe('AuthService', () => {
       email: 'ada@example.com',
       given_name: 'Ada',
       family_name: 'Lovelace',
+      email_verified: true,
     };
 
     beforeEach(() => {
@@ -529,6 +530,27 @@ describe('AuthService', () => {
       await expect(
         service.googleLogin({ code: 'code', client: 'web' }),
       ).rejects.toThrow('Email not provided by Google');
+    });
+
+    it('rejects an unverified Google email', async () => {
+      mockVerifyIdToken.mockResolvedValue({
+        getPayload: () => ({ ...claims, email_verified: false }),
+      });
+
+      await expect(
+        service.googleLogin({ code: 'code', client: 'web' }),
+      ).rejects.toThrow('Google account email is not verified');
+      expect(usersService.create).not.toHaveBeenCalled();
+    });
+
+    it('rejects a token that omits the verification claim', async () => {
+      mockVerifyIdToken.mockResolvedValue({
+        getPayload: () => ({ email: 'ada@example.com' }),
+      });
+
+      await expect(
+        service.googleLogin({ code: 'code', client: 'web' }),
+      ).rejects.toThrow('Google account email is not verified');
     });
 
     it('refuses to take over a local account', async () => {
