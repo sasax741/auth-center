@@ -26,10 +26,15 @@ export class LoggingInterceptor implements NestInterceptor {
           );
         },
         error: (error) => {
-          this.logger.error(
-            `${method} ${url} ${error.status || 500} ${Date.now() - now}ms`,
-            error.stack,
-          );
+          const status = error?.status ?? error?.statusCode ?? 500;
+          const line = `${method} ${url} ${status} ${Date.now() - now}ms`;
+
+          if (status >= 500) {
+            this.logger.error(line, error.stack);
+            return;
+          }
+
+          this.logger.warn(line);
         },
       }),
     );
