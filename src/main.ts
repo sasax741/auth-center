@@ -1,4 +1,5 @@
 import { NestFactory } from '@nestjs/core';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
 import { CustomLogger } from './logger/custom-logger.service';
 import { configureApp, setupSwagger } from './app.setup';
@@ -9,7 +10,9 @@ import { configureApp, setupSwagger } from './app.setup';
  */
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    bodyParser: false,
+  });
 
   app.useLogger(app.get(CustomLogger));
 
