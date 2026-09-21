@@ -3,11 +3,13 @@ import {
   CreateDateColumn,
   DeleteDateColumn,
   Entity,
+  Index,
   PrimaryGeneratedColumn,
 } from 'typeorm';
 import { Exclude } from 'class-transformer';
 
 @Entity()
+@Index(['client', 'email'])
 export class User {
   @PrimaryGeneratedColumn()
   id: number;
