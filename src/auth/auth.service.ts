@@ -147,12 +147,7 @@ export class AuthService {
       keyid: this.jwtConfigService.kid,
     });
 
-    const refreshToken = uuidv4();
-    await this.cacheManager.set(
-      `refresh_token:${refreshToken}`,
-      user.id.toString(),
-      CACHE_TTL_MS.REFRESH_TOKEN,
-    );
+    const refreshToken = await this.issueRefreshToken(user.id);
 
     return {
       email,
@@ -167,6 +162,23 @@ export class AuthService {
     );
 
     if (!userId) {
+      const reusedBy = await this.cacheManager.get<string>(
+        `refresh_used:${refreshToken}`,
+      );
+
+      if (reusedBy) {
+        await this.cacheManager.set(
+          `refresh_revoked:${reusedBy}`,
+          '1',
+          CACHE_TTL_MS.REFRESH_TOKEN,
+        );
+      }
+
+      throw new UnauthorizedException('Invalid or expired refresh token');
+    }
+
+    const revokedAt = await this.cacheManager.get(`refresh_revoked:${userId}`);
+    if (revokedAt) {
       throw new UnauthorizedException('Invalid or expired refresh token');
     }
 
@@ -177,6 +189,11 @@ export class AuthService {
     }
 
     await this.cacheManager.del(`refresh_token:${refreshToken}`);
+    await this.cacheManager.set(
+      `refresh_used:${refreshToken}`,
+      userId,
+      CACHE_TTL_MS.REFRESH_TOKEN,
+    );
 
     const timestamp = Math.floor(Date.now() / 1000);
     const jti = `${user.id}-${timestamp}-${uuidv4()}`;
@@ -194,12 +211,7 @@ export class AuthService {
       keyid: this.jwtConfigService.kid,
     });
 
-    const newRefreshToken = uuidv4();
-    await this.cacheManager.set(
-      `refresh_token:${newRefreshToken}`,
-      user.id.toString(),
-      CACHE_TTL_MS.REFRESH_TOKEN,
-    );
+    const newRefreshToken = await this.issueRefreshToken(user.id);
 
     return {
       email: user.email,
@@ -424,17 +436,25 @@ export class AuthService {
       keyid: this.jwtConfigService.kid,
     });
 
-    const refreshToken = uuidv4();
-    await this.cacheManager.set(
-      `refresh_token:${refreshToken}`,
-      user.id.toString(),
-      CACHE_TTL_MS.REFRESH_TOKEN,
-    );
+    const refreshToken = await this.issueRefreshToken(user.id);
 
     return {
       email: user.email,
       token,
       refresh_token: refreshToken,
     };
+  }
+
+  private async issueRefreshToken(userId: number): Promise<string> {
+    const refreshToken = uuidv4();
+
+    await this.cacheManager.set(
+      `refresh_token:${refreshToken}`,
+      userId.toString(),
+      CACHE_TTL_MS.REFRESH_TOKEN,
+    );
+    await this.cacheManager.del(`refresh_revoked:${userId}`);
+
+    return refreshToken;
   }
 }
