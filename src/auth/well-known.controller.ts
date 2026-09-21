@@ -1,24 +1,12 @@
 import { Controller, Get } from '@nestjs/common';
-import { JwtConfigService } from './constants/jwt-config.service';
-import * as jwk from 'pem-jwk';
+import { JwksService } from './jwks.service';
 
 @Controller()
 export class WellKnownController {
-  constructor(private readonly jwtConfigService: JwtConfigService) {}
+  constructor(private readonly jwksService: JwksService) {}
 
   @Get('.well-known/jwks.json')
   getJwks() {
-    const publicKey = this.jwtConfigService.publicKey;
-    const jwkObject = jwk.pem2jwk(publicKey);
-    return {
-      keys: [
-        {
-          ...jwkObject,
-          kid: this.jwtConfigService.kid,
-          alg: 'RS256',
-          use: 'sig',
-        },
-      ],
-    };
+    return this.jwksService.getDocument();
   }
 }

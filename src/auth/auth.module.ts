@@ -7,6 +7,7 @@ import { JwtConfigModule } from './constants/jwt-config.module';
 import { JwtConfigService } from './constants/jwt-config.service';
 import { AuthGuard } from './guard/auth.guard';
 import { WellKnownController } from './well-known.controller';
+import { JwksService } from './jwks.service';
 import { MailClientModule } from '../mail/mail-client.module';
 import { HttpModule } from '@nestjs/axios';
 
@@ -33,6 +34,6 @@ import { HttpModule } from '@nestjs/axios';
     }),
   ],
   controllers: [AuthController, WellKnownController],
-  providers: [AuthService, AuthGuard],
+  providers: [AuthService, AuthGuard, JwksService],
 })
 export class AuthModule {}
