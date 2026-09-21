@@ -10,10 +10,11 @@ Microservicio de autenticación construido con NestJS que emite tokens JWT firma
 |-------------|-------------------------------------------|
 | Framework   | NestJS + TypeScript                       |
 | Base de datos | PostgreSQL 16 + TypeORM (migraciones)   |
-| Cache / Blacklist | Redis 7                          |
+| Cache / Blacklist | Redis 7 (via @keyv/redis)                 |
 | JWT         | RS256 (claves RSA de 2048 bits)           |
 | OAuth       | Google (Authorization Code)               |
-| Contenedores | Docker + docker-compose                  |
+| Contenedores | Imagen Docker (Swarm) + Compose para desarrollo local |
+| Seguridad HTTP | helmet + límite de body + allow list de clientes |
 | Rate Limiting | @nestjs/throttler (3 niveles)           |
 | Tracing     | Correlation ID + AsyncLocalStorage        |
 
@@ -30,14 +31,14 @@ C4Context
     System_Boundary(auth, "API Auth Service") {
         Container(api, "NestJS App", "Node.js, TypeScript", "AuthN: register, login, login con Google, logout, JWKS")
         ContainerDb(pg, "PostgreSQL", "TypeORM", "Almacena usuarios (name, email, password hash, client, provider)")
-        ContainerDb(redis, "Redis", "cache-manager", "Blacklist de tokens (jti revocados)")
+        ContainerDb(redis, "Redis", "@keyv/redis", "Blacklist de tokens revocados, refresh y verify tokens")
     }
 
     System_Ext(business, "External Microservices", "Servicios de negocio que consumen JWKS para validar tokens")
 
     Rel(client, api, "HTTP /api/v1/auth/*", "HTTPS")
     Rel(api, pg, "TypeORM", "SQL")
-    Rel(api, redis, "ioredis", "Cache protocol")
+    Rel(api, redis, "Redis protocol", "Cache")
     Rel(business, api, "GET /.well-known/jwks.json", "HTTPS")
     UpdateLayoutConfig($c4ShapeInRow="3", $c4BoundaryInRow="1")
 ```
@@ -83,15 +84,15 @@ Todos los endpoints operativos están prefijados con `/api/v1`.
 | `POST`  | `/auth/register`                 | Registra un nuevo usuario + envía email de verificación                        | No   | 5 req/min      |
 | `POST`  | `/auth/login`                    | Autentica con email/password y devuelve JWT RS256 + refresh_token        | No   | 5 req/min      |
 | `POST`  | `/auth/google`                   | Autentica con Google (Authorization Code) + crea usuario si no existe. Devuelve JWT + refresh_token | No   | 5 req/min      |
-| `POST`  | `/auth/refresh`                  | Canjea refresh token por nuevo access token + nuevo refresh token (rotación) | No   | Global         |
+| `POST`  | `/auth/refresh`                  | Canjea refresh token por nuevo access token + nuevo refresh token (rotación) | No   | 10 req/min     |
 | `POST`  | `/auth/logout`                   | Revoca el token actual (agrega jti a Redis blacklist)                       | Sí   | Global         |
 | `POST`  | `/auth/verify-email`             | Verifica el email con token recibido por correo                             | No   | 5 req/min      |
-| `DELETE`| `/auth/deleteUser/:id`           | Soft-delete de usuario (solo el propio dueño)                               | Sí   | Global         |
+| `DELETE`| `/auth/deleteUser/:id`           | Soft-delete de usuario (solo el propio dueño)                               | Sí   | 5 req/min      |
 | `POST`  | `/auth/forgot-password`          | Envía email con token para resetear contraseña (rate limit por email)       | No   | 3 req/min      |
 | `POST`  | `/auth/reset-password`           | Resetea la contraseña con el token recibido por correo                      | No   | 3 req/min      |
 | `GET`   | `/users`                         | Lista usuarios (paginado: `?page=1&limit=10`)                               | Sí   | Global         |
 | `GET`   | `/users/:id`                     | Obtiene un usuario por ID                                                   | Sí   | Global         |
-| `GET`   | `/health`                        | Health check con ping a PostgreSQL                                          | No   | Global         |
+| `GET`   | `/health`                        | Health check con ping a PostgreSQL y Redis                                  | No   | Global         |
 | `GET`   | `/.well-known/jwks.json`         | Clave pública en formato JWKS (ruta absoluta, sin prefijo)                  | No   | Global         |
 
 ---
@@ -228,6 +229,7 @@ El login devuelve un `refresh_token` además del access token JWT:
 - El refresh token es un UUID v4 almacenado en Redis con **7 días de TTL**
 - Cuando expira el access token, el cliente puede llamar a `POST /auth/refresh`
 - **Rotación**: al usar un refresh token, se invalida el anterior y se genera uno nuevo
+- **Detección de reuso**: el token rotado queda marcado. Si se presenta otra vez (robo), se revoca toda la familia de refresh tokens de esa cuenta y el usuario debe loguearse de nuevo
 - El endpoint `POST /auth/logout` revoca solo el access token actual; para logout completo descartar el refresh token del lado del cliente
 
 ---
@@ -372,6 +374,8 @@ Además del rate limiter global, los siguientes endpoints tienen overrides espec
 |:--------------------|:-------------|:--------|
 | `register`          | 5 requests   | 1 min   |
 | `login`             | 5 requests   | 1 min   |
+| `refresh`           | 10 requests  | 1 min   |
+| `deleteUser`        | 5 requests   | 1 min   |
 | `google`            | 5 requests   | 1 min   |
 | `forgot-password`   | 3 requests   | 1 min   |
 | `reset-password`    | 3 requests   | 1 min   |
@@ -381,12 +385,30 @@ El endpoint `forgot-password` también tiene un **rate limit adicional por email
 
 ---
 
+## Seguridad HTTP
+
+| Medida                     | Comportamiento                                                                 |
+|:---------------------------|:-------------------------------------------------------------------------------|
+| **Allow list de clientes** | `ALLOWED_CLIENTS` es obligatorio: el servicio **no arranca** si falta o está vacío. Todo `register`/`login`/`google` con un `client` fuera de la lista se rechaza con 401 |
+| **Headers**                | `helmet` en todas las respuestas (incluye `X-Content-Type-Options`, `X-Frame-Options`, HSTS). `X-Powered-By` no se envía |
+| **Límite de body**         | 100 KB por defecto, configurable con `BODY_LIMIT`. Un body mayor responde 413 |
+| **CORS**                   | Deshabilitado salvo que definas `CORS_ORIGINS` (lista separada por comas); con valor, se habilita solo para esos orígenes |
+| **Configuración JWT**      | El servicio falla al arrancar si falta `JWT_PRIVATE_KEY`, `JWT_PUBLIC_KEY` o `JWT_KID`, o si la clave pública no se puede publicar como JWKS |
+| **Contraseñas**            | Nunca se devuelven: la entity excluye el campo y `register` solo expone datos públicos |
+| **Google**                 | Solo se aceptan identidades con `email_verified` en el token de Google |
+
+Los errores no esperados nunca exponen su mensaje interno: el filtro global responde 500 genérico, mientras que los errores de cliente (body demasiado grande, JSON malformado) conservan su status real (413/400).
+
+---
+
 ## Quick Start
 
-### 1. Docker Compose (recomendado)
+### 1. Stack de desarrollo (Docker Compose)
+
+Levanta **solo** PostgreSQL y Redis; la API corre en el host con `pnpm start`. La imagen de la app es para desplegar (ver [Despliegue](#despliegue)).
 
 ```bash
-# Clonar e iniciar
+# Clonar
 git clone <repo-url> && cd api-auth
 cp .env.example .env
 
@@ -395,52 +417,63 @@ openssl genrsa -out private.pem 2048
 openssl rsa -in private.pem -pubout -out public.pem
 # Copiar contenido de private.pem a JWT_PRIVATE_KEY y public.pem a JWT_PUBLIC_KEY
 
-# Levantar todo (PostgreSQL + Redis + API)
-docker-compose up -d
+# Base de datos y cache
+docker compose -f docker-compose.dev.yml up -d
+
+# Migraciones y API
+pnpm install
+pnpm migration:run
+pnpm start
 ```
 
-El entrypoint de Docker corre las migraciones automáticamente antes de iniciar la app.
+Si el shell exporta hostnames internos de Compose (por ejemplo `DB_HOST=db`), exportá `DB_HOST=localhost REDIS_HOST=localhost` antes de correr la app o las migraciones.
 
 ### 2. Manual (desarrollo local)
 
 ```bash
 # Variables de entorno
 cp .env.example .env
-# Configurar DB_HOST=localhost, REDIS_HOST=localhost y las claves RSA
+# Completar DB_*, REDIS_HOST, ALLOWED_CLIENTS y las claves RSA
 
 # Dependencias
-npm install
+pnpm install
 
 # Migraciones (requiere PostgreSQL corriendo)
-npx ts-node datasource.ts
-npx typeorm-ts-node-commonjs migration:run --dataSource datasource.ts
+pnpm migration:run
 
 # Iniciar
-npm run start:dev
+pnpm dev
 ```
 
 ### Variables de Entorno
 
-```env
-# Base de datos
-DB_HOST=localhost
-DB_PORT=5432
-DB_USER=root
-DB_PASSWORD=password
-DB_NAME=auth
+Las marcadas como **(requerida)** son validadas al arrancar: si faltan, el proceso no inicia.
 
-# JWT RS256 (contenido PEM completo)
+```env
+# Base de datos (requeridas)
+DB_HOST=localhost        # (requerida)
+DB_PORT=5432             # (requerida)
+DB_USER=root             # (requerida)
+DB_PASSWORD=password     # (requerida)
+DB_NAME=auth             # (requerida)
+
+# JWT RS256 (requeridas, contenido PEM completo)
 JWT_PRIVATE_KEY=-----BEGIN RSA PRIVATE KEY-----
 JWT_PUBLIC_KEY=-----BEGIN PUBLIC KEY-----
 JWT_KID=my-key-id
 
-# Redis
+# Redis (requerido: REDIS_HOST o REDIS_URL)
 REDIS_HOST=localhost
 REDIS_PORT=6379
+# REDIS_URL=redis://usuario:password@host:6379   # alternativa; usar rediss:// para TLS
+# REDIS_PASSWORD=
 
 # App
 PORT=3000
 NODE_ENV=development
+ALLOWED_CLIENTS=web,mobile   # (requerida) clientes habilitados, separados por coma
+# CORS_ORIGINS=https://app.example.com,https://admin.example.com
+# BODY_LIMIT=100kb
 
 # Mail Service
 MAIL_SERVICE_URL=http://mail:8080
@@ -458,28 +491,35 @@ GOOGLE_CLIENT_SECRET=GOCSPX-xxxxxxxxxxxx
 src/
 ├── auth/                  # Módulo de autenticación
 │   ├── auth.controller.ts    # register, login, refresh, logout, verify-email, deleteUser, forgot/reset-password
-│   ├── auth.service.ts       # Lógica de negocio + transacciones + refresh tokens + verificación email
+│   ├── auth.service.ts       # Lógica de negocio + refresh tokens + reuse detection + verificación email
+│   ├── jwks.service.ts       # Construye el JWKS una vez al arrancar (fail-fast)
 │   ├── well-known.controller.ts  # GET /.well-known/jwks.json
 │   ├── guard/auth.guard.ts   # Validación JWT + blacklist Redis
 │   ├── decorators/           # @GetUser() decorator
-│   ├── dto/                  # register, login, forgot-password, reset-password, refresh-token, verify-email
-│   └── constants/            # JwtConfigService (carga claves PEM)
+│   ├── dto/                  # register, login, forgot-password, reset-password, refresh-token, verify-email, google-login
+│   └── constants/            # JwtConfigService (claves PEM) + TTLs del cache
 ├── users/                 # Módulo de usuarios
-│   ├── users.controller.ts   # CRUD protegido (paginado)
+│   ├── users.controller.ts   # CRUD protegido (paginado, aislado por cliente)
 │   ├── users.service.ts      # find, remove (soft-delete)
-│   └── entities/user.entity.ts  # TypeORM entity (con emailVerifiedAt)
+│   ├── dto/pagination.dto.ts # page/limit con tope
+│   └── entities/user.entity.ts  # TypeORM entity (provider, emailVerifiedAt, índice client+email)
 ├── mail/                  # Cliente HTTP para Mail Service externo
 │   ├── mail-client.module.ts
 │   └── mail-client.service.ts  # sendPasswordResetEmail, sendVerificationEmail
+├── config/                # validateEnv (validación de entorno al arrancar)
 ├── migrations/            # Migraciones TypeORM
 │   ├── 1758608433133-InitialSchema.ts
-│   └── 1758608433134-FixDaletedAtTypo.ts
+│   ├── 1758608433134-FixDaletedAtTypo.ts
+│   ├── 1758608433135-AddProviderAndNullablePassword.ts
+│   ├── 1758608433136-AddEmailVerifiedAt.ts
+│   └── 1758608433137-AddClientEmailIndex.ts
 ├── middleware/             # CorrelationIdMiddleware
 ├── request-context/       # AsyncLocalStorage wrapper
 ├── logger/                # CustomLogger con correlation ID
 ├── interceptors/          # LoggingInterceptor
 ├── filters/               # AllExceptionsFilter (global)
-├── health/                # HealthController (Terminus)
+├── health/                # HealthController (Terminus) + RedisHealthIndicator
+├── app.setup.ts           # helmet, CORS, límite de body, pipes y prefijo global
 └── interfaces/            # JwtPayload interface
 ```
 
@@ -494,8 +534,8 @@ src/
 | **TypeORM migraciones**      | `synchronize: true` | Control de cambios en DB, rollbacks, revisión en código                |
 | **AsyncLocalStorage**        | Request-scoped DI | Contexto implícito sin acoplar firmas de métodos                        |
 | **Redis blacklist (jti)**    | Blacklist en DB   | O(1) en memoria, TTL automático, no satura la DB                        |
-| **cache-manager**            | ioredis directo   | Abstracción intercambiable (Redis → Memcached sin cambiar código)       |
-| **Refresh token rotativo**   | Refresh token fijo | Invalida el token anterior al usarlo, limita ventana de ataque         |
+| **cache-manager + Keyv**     | ioredis directo   | Abstracción intercambiable; `@keyv/redis` es el adapter mantenido para cache-manager 7 |
+| **Refresh token rotativo**   | Refresh token fijo | Invalida el token anterior al usarlo y revoca la familia completa si se detecta reuso |
 | **Callback URL agnóstico**   | Frontend URL fijo | Cada proyecto decide su propia URL de reset/verificación; el auth service solo envía el mail |
 | **Mail service externo**     | Mailer embebido   | El auth service no envía emails directamente; delega en un servicio Go independiente |
 
@@ -505,22 +545,33 @@ src/
 
 ```bash
 # Tests unitarios
-npm run test
+pnpm test
 
-# Tests e2e
-npm run test:e2e
+# Tests e2e (requiere el stack de docker-compose.dev.yml levantado y migrado)
+pnpm test:e2e
 
 # Cobertura
-npm run test:cov
+pnpm test:cov
 ```
+
+Los e2e solo mockean el envío de mails: el resto corre contra PostgreSQL y Redis reales, incluyendo verificación de email, rotación de refresh tokens, revocación por logout y aislamiento entre clientes.
 
 ---
 
 ## Despliegue
 
-El `Dockerfile` usa build multi-stage con `pnpm` para minimizar la imagen final. El `docker-entrypoint.sh` ejecuta las migraciones antes de iniciar la app.
+El `Dockerfile` usa build multi-stage con `pnpm` para minimizar la imagen final. El `docker-entrypoint.sh` espera a que la base acepte conexiones, corre las migraciones pendientes y recién ahí inicia la app (corre como usuario no root).
 
 ```bash
 # Build manual
 docker build -t api-auth .
 ```
+
+Variables propias del entrypoint:
+
+| Variable             | Default | Descripción                                                        |
+|:---------------------|:--------|:--------------------------------------------------------------------|
+| `RUN_MIGRATIONS`     | `true`  | Aplica migraciones antes de arrancar. En Swarm con varias réplicas, dejar `true` en una sola task (o en una task de migración) y `false` en el resto, para evitar carreras |
+| `DB_WAIT_ATTEMPTS`   | `60`    | Intentos de espera de la base antes de abortar (uno cada 2s)        |
+
+En Swarm, el servicio necesita `DB_*`, `REDIS_HOST`/`REDIS_URL`, `ALLOWED_CLIENTS` y las claves `JWT_*`. Como las claves se leen desde variables de entorno, si preferís Docker secrets (archivos) exportá su contenido al arrancar la task o pasalas como variables del servicio.
