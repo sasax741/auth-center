@@ -1,67 +1,49 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
+import { JwtService } from '@nestjs/jwt';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
-import { UsersService } from '../users/users.service';
-import { JwtService } from '@nestjs/jwt';
 import { JwtConfigService } from './constants/jwt-config.service';
-import { DataSource } from 'typeorm';
-import { CACHE_MANAGER } from '@nestjs/cache-manager';
-import { MailClientService } from '../mail/mail-client.service';
-import { HttpService } from '@nestjs/axios';
-import { ConfigService } from '@nestjs/config';
 
 describe('AuthController', () => {
   let controller: AuthController;
+  let authService: {
+    register: jest.Mock;
+    login: jest.Mock;
+    refresh: jest.Mock;
+    logout: jest.Mock;
+    verifyEmail: jest.Mock;
+    deleteUser: jest.Mock;
+    forgotPassword: jest.Mock;
+    resetPassword: jest.Mock;
+    googleLogin: jest.Mock;
+  };
 
   beforeEach(async () => {
+    authService = {
+      register: jest.fn(),
+      login: jest.fn(),
+      refresh: jest.fn(),
+      logout: jest.fn(),
+      verifyEmail: jest.fn(),
+      deleteUser: jest.fn(),
+      forgotPassword: jest.fn(),
+      resetPassword: jest.fn(),
+      googleLogin: jest.fn(),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       controllers: [AuthController],
       providers: [
-        AuthService,
-        {
-          provide: UsersService,
-          useValue: {
-            findOneByEmail: jest.fn(),
-            create: jest.fn(),
-            findOne: jest.fn(),
-            remove: jest.fn(),
-          },
-        },
-        {
-          provide: JwtService,
-          useValue: { signAsync: jest.fn() },
-        },
-        {
-          provide: JwtConfigService,
-          useValue: { kid: 'test-kid', privateKey: '', publicKey: '' },
-        },
-        {
-          provide: DataSource,
-          useValue: {
-            transaction: jest.fn(),
-            getRepository: jest.fn(() => ({
-              save: jest.fn(),
-            })),
-          },
-        },
+        { provide: AuthService, useValue: authService },
         {
           provide: CACHE_MANAGER,
           useValue: { get: jest.fn(), set: jest.fn(), del: jest.fn() },
         },
+        { provide: JwtService, useValue: { verifyAsync: jest.fn() } },
         {
-          provide: MailClientService,
-          useValue: {
-            sendPasswordResetEmail: jest.fn(),
-            sendVerificationEmail: jest.fn(),
-          },
-        },
-        {
-          provide: HttpService,
-          useValue: { post: jest.fn() },
-        },
-        {
-          provide: ConfigService,
-          useValue: { get: jest.fn() },
+          provide: JwtConfigService,
+          useValue: { publicKey: 'public-key', kid: 'test-kid' },
         },
       ],
     }).compile();
@@ -69,7 +51,64 @@ describe('AuthController', () => {
     controller = module.get<AuthController>(AuthController);
   });
 
-  it('should be defined', () => {
-    expect(controller).toBeDefined();
+  it('forwards the callback url supplied with the registration', () => {
+    const dto = {
+      name: 'Ada',
+      lastName: 'Lovelace',
+      email: 'ada@example.com',
+      password: 'secret123',
+      client: 'web',
+      callback_url: 'https://app.example.com/verify',
+    };
+
+    controller.register(dto);
+
+    expect(authService.register).toHaveBeenCalledWith(
+      dto,
+      'https://app.example.com/verify',
+    );
+  });
+
+  it('delegates the refresh token from the body', () => {
+    controller.refresh({ refresh_token: 'refresh-token' });
+
+    expect(authService.refresh).toHaveBeenCalledWith('refresh-token');
+  });
+
+  it('passes the authenticated payload on logout', () => {
+    const user = { jti: 'abc', sub: 7 } as never;
+
+    controller.logout(user);
+
+    expect(authService.logout).toHaveBeenCalledWith(user);
+  });
+
+  it('delegates the parsed route id when deleting a user', () => {
+    const user = { jti: 'abc', sub: 7 } as never;
+
+    controller.deleteUser(7, user);
+
+    expect(authService.deleteUser).toHaveBeenCalledWith(7, user);
+  });
+
+  it('delegates the email and callback url on a password reset request', () => {
+    controller.forgotPassword({
+      email: 'ada@example.com',
+      callback_url: 'https://app.example.com/reset',
+    });
+
+    expect(authService.forgotPassword).toHaveBeenCalledWith(
+      'ada@example.com',
+      'https://app.example.com/reset',
+    );
+  });
+
+  it('delegates the authorization code for a federated login', () => {
+    controller.googleLogin({ code: 'code', client: 'web' });
+
+    expect(authService.googleLogin).toHaveBeenCalledWith({
+      code: 'code',
+      client: 'web',
+    });
   });
 });
