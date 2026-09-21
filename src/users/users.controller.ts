@@ -1,4 +1,11 @@
-import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Param,
+  ParseIntPipe,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 import { UsersService } from './users.service';
 import { AuthGuard } from '../auth/guard/auth.guard';
 import { GetUser } from '../auth/decorators/get-user.decorator';
@@ -21,7 +28,7 @@ export class UsersController {
 
   @Get(':id')
   @UseGuards(AuthGuard)
-  findOne(@Param('id') id: string, @GetUser() user: JwtPayload) {
-    return this.usersService.findOne(+id, user.aud);
+  findOne(@Param('id', ParseIntPipe) id: number, @GetUser() user: JwtPayload) {
+    return this.usersService.findOne(id, user.aud);
   }
 }

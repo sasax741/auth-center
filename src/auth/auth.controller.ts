@@ -4,6 +4,7 @@ import {
   Post,
   Delete,
   Param,
+  ParseIntPipe,
   UseGuards,
 } from '@nestjs/common';
 import { AuthService } from './auth.service';
@@ -54,7 +55,10 @@ export class AuthController {
 
   @Delete('deleteUser/:id')
   @UseGuards(AuthGuard)
-  deleteUser(@Param('id') id: number, @GetUser() user: JwtPayload) {
+  deleteUser(
+    @Param('id', ParseIntPipe) id: number,
+    @GetUser() user: JwtPayload,
+  ) {
     return this.authService.deleteUser(id, user);
   }
 
