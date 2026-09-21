@@ -37,6 +37,7 @@ export class AuthController {
   }
 
   @Post('refresh')
+  @Throttle({ short: { limit: 10, ttl: 60000 } })
   refresh(@Body() refreshTokenDto: RefreshTokenDto) {
     return this.authService.refresh(refreshTokenDto.refresh_token);
   }
@@ -55,6 +56,7 @@ export class AuthController {
 
   @Delete('deleteUser/:id')
   @UseGuards(AuthGuard)
+  @Throttle({ short: { limit: 5, ttl: 60000 } })
   deleteUser(
     @Param('id', ParseIntPipe) id: number,
     @GetUser() user: JwtPayload,
