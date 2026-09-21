@@ -10,7 +10,7 @@ import { Request } from 'express';
 import { JwtConfigService } from '../constants/jwt-config.service';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Cache } from 'cache-manager';
-import { JwtPayload } from 'src/interfaces/jwt-payload.interface';
+import { JwtPayload } from '../../interfaces/jwt-payload.interface';
 
 @Injectable()
 export class AuthGuard implements CanActivate {
