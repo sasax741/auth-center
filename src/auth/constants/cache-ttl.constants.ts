@@ -1,0 +1,6 @@
+export const CACHE_TTL_MS = {
+  VERIFY_EMAIL: 24 * 60 * 60 * 1000,
+  REFRESH_TOKEN: 7 * 24 * 60 * 60 * 1000,
+  PASSWORD_RESET: 15 * 60 * 1000,
+  FORGOT_PASSWORD_RATE_LIMIT: 5 * 60 * 1000,
+} as const;

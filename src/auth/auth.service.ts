@@ -26,6 +26,7 @@ import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
 import { firstValueFrom } from 'rxjs';
 import { OAuth2Client } from 'google-auth-library';
+import { CACHE_TTL_MS } from './constants/cache-ttl.constants';
 
 @Injectable()
 export class AuthService {
@@ -81,7 +82,11 @@ export class AuthService {
       });
 
     const verifyToken = uuidv4();
-    await this.cacheManager.set(`verify_token:${verifyToken}`, email, 86400);
+    await this.cacheManager.set(
+      `verify_token:${verifyToken}`,
+      email,
+      CACHE_TTL_MS.VERIFY_EMAIL,
+    );
 
     try {
       await this.mailClientService.sendVerificationEmail(
@@ -146,7 +151,7 @@ export class AuthService {
     await this.cacheManager.set(
       `refresh_token:${refreshToken}`,
       user.id.toString(),
-      604800,
+      CACHE_TTL_MS.REFRESH_TOKEN,
     );
 
     return {
@@ -193,7 +198,7 @@ export class AuthService {
     await this.cacheManager.set(
       `refresh_token:${newRefreshToken}`,
       user.id.toString(),
-      604800,
+      CACHE_TTL_MS.REFRESH_TOKEN,
     );
 
     return {
@@ -208,7 +213,7 @@ export class AuthService {
     const ttl = exp - Math.floor(Date.now() / 1000);
 
     if (ttl > 0) {
-      await this.cacheManager.set(`revoked:${jti}`, 'revoked', ttl);
+      await this.cacheManager.set(`revoked:${jti}`, 'revoked', ttl * 1000);
     }
 
     return { message: 'Logout successful' };
@@ -280,11 +285,19 @@ export class AuthService {
       return { message: 'If the email exists, a reset link has been sent' };
     }
 
-    await this.cacheManager.set(rateLimitKey, '1', 300);
+    await this.cacheManager.set(
+      rateLimitKey,
+      '1',
+      CACHE_TTL_MS.FORGOT_PASSWORD_RATE_LIMIT,
+    );
 
     const resetToken = uuidv4();
 
-    await this.cacheManager.set(`reset_token:${resetToken}`, email, 900);
+    await this.cacheManager.set(
+      `reset_token:${resetToken}`,
+      email,
+      CACHE_TTL_MS.PASSWORD_RESET,
+    );
 
     try {
       await this.mailClientService.sendPasswordResetEmail(
@@ -415,7 +428,7 @@ export class AuthService {
     await this.cacheManager.set(
       `refresh_token:${refreshToken}`,
       user.id.toString(),
-      604800,
+      CACHE_TTL_MS.REFRESH_TOKEN,
     );
 
     return {

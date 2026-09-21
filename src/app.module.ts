@@ -8,7 +8,7 @@ import { AppService } from './app.service';
 import { UsersModule } from './users/users.module';
 import { AuthModule } from './auth/auth.module';
 import { CacheModule } from '@nestjs/cache-manager';
-import * as redisStore from 'cache-manager-redis-store';
+import { createKeyv } from '@keyv/redis';
 import { CorrelationIdMiddleware } from './middleware/correlation-id.middleware';
 import { RequestContextModule } from './request-context/request-context.module';
 import { CustomLogger } from './logger/custom-logger.service';
@@ -40,11 +40,30 @@ import { LoggingInterceptor } from './interceptors/logging.interceptor';
       isGlobal: true,
       imports: [ConfigModule],
       inject: [ConfigService],
-      useFactory: (configService: ConfigService) => ({
-        store: redisStore,
-        host: configService.get<string>('REDIS_HOST') || 'localhost',
-        port: configService.get<number>('REDIS_PORT') || 6379,
-      }),
+      useFactory: (configService: ConfigService) => {
+        const url = configService.get<string>('REDIS_URL');
+        const password = configService.get<string>('REDIS_PASSWORD');
+
+        const connection = url
+          ? { url, ...(password ? { password } : {}) }
+          : {
+              socket: {
+                host: configService.get<string>('REDIS_HOST') || 'localhost',
+                port: configService.get<number>('REDIS_PORT') || 6379,
+                connectTimeout: 5000,
+              },
+              ...(password ? { password } : {}),
+            };
+
+        return {
+          stores: [
+            createKeyv(connection, {
+              namespace: 'auth',
+              connectionTimeout: 5000,
+            }),
+          ],
+        };
+      },
     }),
     ConfigModule.forRoot({
       isGlobal: true,
