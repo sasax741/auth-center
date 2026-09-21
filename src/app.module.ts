@@ -15,6 +15,7 @@ import { CustomLogger } from './logger/custom-logger.service';
 import { AllExceptionsFilter } from './filters/all-exceptions.filter';
 import { HealthModule } from './health/health.module';
 import { LoggingInterceptor } from './interceptors/logging.interceptor';
+import { validateEnv } from './config/env.validation';
 
 @Module({
   imports: [
@@ -67,6 +68,7 @@ import { LoggingInterceptor } from './interceptors/logging.interceptor';
     }),
     ConfigModule.forRoot({
       isGlobal: true,
+      validate: validateEnv,
     }),
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],

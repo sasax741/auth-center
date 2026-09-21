@@ -6,6 +6,7 @@ import {
   HttpStatus,
   Injectable,
   InternalServerErrorException,
+  Logger,
   UnauthorizedException,
   Inject,
 } from '@nestjs/common';
@@ -27,9 +28,12 @@ import { ConfigService } from '@nestjs/config';
 import { firstValueFrom } from 'rxjs';
 import { OAuth2Client } from 'google-auth-library';
 import { CACHE_TTL_MS } from './constants/cache-ttl.constants';
+import { parseAllowedClients } from '../config/env.validation';
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     @Inject(CACHE_MANAGER) private cacheManager: Cache,
     private readonly usersService: UsersService,
@@ -42,12 +46,11 @@ export class AuthService {
   ) {}
 
   private assertAllowedClient(client: string): void {
-    const allowed = (this.configService.get<string>('ALLOWED_CLIENTS') ?? '')
-      .split(',')
-      .map((value) => value.trim())
-      .filter(Boolean);
+    const allowed = parseAllowedClients(
+      this.configService.get<string>('ALLOWED_CLIENTS'),
+    );
 
-    if (allowed.length > 0 && !allowed.includes(client)) {
+    if (!allowed.includes(client)) {
       throw new UnauthorizedException('Invalid credentials');
     }
   }
@@ -94,8 +97,10 @@ export class AuthService {
         verifyToken,
         callbackUrl,
       );
-    } catch {
-      // Email sending failed, but user was created — they can retry verification
+    } catch (error) {
+      this.logger.warn(
+        `Verification email could not be sent to ${email}: ${error.message}`,
+      );
     }
 
     return user;

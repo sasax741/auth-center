@@ -208,6 +208,20 @@ describe('AuthService', () => {
       expect(usersService.create).not.toHaveBeenCalled();
     });
 
+    it('accepts no client at all when the allow list is empty', async () => {
+      const configured = config.ALLOWED_CLIENTS;
+      config.ALLOWED_CLIENTS = '';
+
+      try {
+        await expect(service.register(dto)).rejects.toBeInstanceOf(
+          UnauthorizedException,
+        );
+        expect(usersService.create).not.toHaveBeenCalled();
+      } finally {
+        config.ALLOWED_CLIENTS = configured;
+      }
+    });
+
     it('still returns the created user when the verification email fails', async () => {
       usersService.findOneByEmail.mockResolvedValue(null);
       mailClientService.sendVerificationEmail.mockRejectedValue(
