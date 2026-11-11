@@ -28,6 +28,16 @@ export function configureApp(app: INestApplication): ConfigService {
 
   expressApp.use(helmet());
 
+  const trustProxy = configService.get<string>('TRUST_PROXY');
+  if (trustProxy) {
+    const expressInstance = expressApp.getHttpAdapter().getInstance();
+    const numeric = Number(trustProxy);
+    expressInstance.set(
+      'trust proxy',
+      Number.isInteger(numeric) ? numeric : trustProxy,
+    );
+  }
+
   const corsOrigins = parseCorsOrigins(
     configService.get<string>('CORS_ORIGINS'),
   );

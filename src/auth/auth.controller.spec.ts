@@ -12,7 +12,10 @@ describe('AuthController', () => {
     login: jest.Mock;
     refresh: jest.Mock;
     logout: jest.Mock;
+    logoutAll: jest.Mock;
     verifyEmail: jest.Mock;
+    resendVerificationEmail: jest.Mock;
+    changePassword: jest.Mock;
     deleteUser: jest.Mock;
     forgotPassword: jest.Mock;
     resetPassword: jest.Mock;
@@ -25,7 +28,10 @@ describe('AuthController', () => {
       login: jest.fn(),
       refresh: jest.fn(),
       logout: jest.fn(),
+      logoutAll: jest.fn(),
       verifyEmail: jest.fn(),
+      resendVerificationEmail: jest.fn(),
+      changePassword: jest.fn(),
       deleteUser: jest.fn(),
       forgotPassword: jest.fn(),
       resetPassword: jest.fn(),
@@ -110,5 +116,40 @@ describe('AuthController', () => {
       code: 'code',
       client: 'web',
     });
+  });
+
+  it('delegates a logout-all request with the authenticated payload', () => {
+    const user = { jti: 'abc', sub: 7 } as never;
+
+    controller.logoutAll(user);
+
+    expect(authService.logoutAll).toHaveBeenCalledWith(user);
+  });
+
+  it('delegates the email and callback url on resend verification', () => {
+    controller.resendVerification({
+      email: 'ada@example.com',
+      callback_url: 'https://app.example.com/verify',
+    });
+
+    expect(authService.resendVerificationEmail).toHaveBeenCalledWith(
+      'ada@example.com',
+      'https://app.example.com/verify',
+    );
+  });
+
+  it('delegates the passwords when changing credentials', () => {
+    const user = { jti: 'abc', sub: 7 } as never;
+
+    controller.changePassword(user, {
+      currentPassword: 'oldpass1',
+      newPassword: 'newpass1',
+    });
+
+    expect(authService.changePassword).toHaveBeenCalledWith(
+      user,
+      'oldpass1',
+      'newpass1',
+    );
   });
 });

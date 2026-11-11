@@ -1,26 +1,30 @@
 {
   "name": "api-auth",
-  "version": "0.0.1",
-  "description": "",
+  "version": "1.0.0",
+  "description": "AuthN/AuthZ service (RS256 + JWKS) with distributed rate limiting",
   "author": "",
   "private": true,
   "license": "UNLICENSED",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "build": "nest build",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
     "start": "nest start",
     "dev": "nest start --watch",
     "start:debug": "nest start --debug --watch",
-    "start:prod": "node dist/main",
-    "lint": "eslint \"{src,apps,libs,test}/**/*.ts\" --fix",
+    "start:prod": "node dist/src/main",
+    "lint": "eslint \"{src,apps,libs,test}/**/*.ts\"",
+    "lint:fix": "eslint \"{src,apps,libs,test}/**/*.ts\" --fix",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
     "test:e2e": "jest --config ./test/jest-e2e.json",
     "typeorm": "ts-node -r dotenv/config ./node_modules/typeorm/cli.js",
-    "migration:generate": "yarn typeorm migration:generate --dataSource datasource.ts",
-    "migration:run": "yarn typeorm migration:run --dataSource datasource.ts"
+    "migration:generate": "pnpm typeorm migration:generate --dataSource datasource.ts",
+    "migration:run": "pnpm typeorm migration:run --dataSource datasource.ts"
   },
   "dependencies": {
     "@keyv/redis": "^5.1.6",
