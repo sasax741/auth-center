@@ -5,6 +5,9 @@ const REQUIRED_KEYS = [
   'DB_PASSWORD',
   'DB_NAME',
   'ALLOWED_CLIENTS',
+  'JWT_PRIVATE_KEY',
+  'JWT_PUBLIC_KEY',
+  'JWT_KID',
 ] as const;
 
 export function parseAllowedClients(value: string | undefined): string[] {

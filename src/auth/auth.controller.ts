@@ -15,6 +15,8 @@ import { ResetPasswordDto } from './dto/reset-password.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { VerifyEmailDto } from './dto/verify-email.dto';
 import { GoogleLoginDto } from './dto/google-login.dto';
+import { ResendVerificationDto } from './dto/resend-verification.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
 import { AuthGuard } from './guard/auth.guard';
 import { JwtPayload } from '../interfaces/jwt-payload.interface';
 import { GetUser } from './decorators/get-user.decorator';
@@ -48,10 +50,38 @@ export class AuthController {
     return this.authService.logout(user);
   }
 
+  @Post('logout-all')
+  @UseGuards(AuthGuard)
+  logoutAll(@GetUser() user: JwtPayload) {
+    return this.authService.logoutAll(user);
+  }
+
   @Post('verify-email')
   @Throttle({ short: { limit: 5, ttl: 60000 } })
   verifyEmail(@Body() verifyEmailDto: VerifyEmailDto) {
     return this.authService.verifyEmail(verifyEmailDto.token);
+  }
+
+  @Post('resend-verification')
+  @Throttle({ short: { limit: 5, ttl: 60000 } })
+  resendVerification(@Body() resendVerificationDto: ResendVerificationDto) {
+    return this.authService.resendVerificationEmail(
+      resendVerificationDto.email,
+      resendVerificationDto.callback_url,
+    );
+  }
+
+  @Post('change-password')
+  @UseGuards(AuthGuard)
+  changePassword(
+    @GetUser() user: JwtPayload,
+    @Body() changePasswordDto: ChangePasswordDto,
+  ) {
+    return this.authService.changePassword(
+      user,
+      changePasswordDto.currentPassword,
+      changePasswordDto.newPassword,
+    );
   }
 
   @Delete('deleteUser/:id')
