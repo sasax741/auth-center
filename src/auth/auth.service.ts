@@ -55,35 +55,108 @@ export class AuthService {
     }
   }
 
+  private normalizeEmail(email: string): string {
+    return email.trim().toLowerCase();
+  }
+
+  private async signAccessToken(user: User): Promise<string> {
+    const timestamp = Math.floor(Date.now() / 1000);
+    const jti = `${user.id}-${timestamp}-${uuidv4()}`;
+
+    return this.jwtService.signAsync(
+      {
+        email: user.email,
+        sub: user.id,
+        iss: 'auth waves',
+        aud: user.client,
+        nbf: timestamp,
+        jti,
+        authVersion: user.authVersion ?? 0,
+      },
+      { keyid: this.jwtConfigService.kid },
+    );
+  }
+
+  private async revokeRefreshFamily(userId: number): Promise<void> {
+    await this.cacheManager.set(
+      `refresh_revoked:${userId}`,
+      '1',
+      CACHE_TTL_MS.REFRESH_TOKEN,
+    );
+  }
+
+  /**
+   * Revokes every session of a user: bumps the auth version persisted on the
+   * user row, mirrors it in Redis (so the guard can validate without a query)
+   * and revokes the refresh-token family. New tokens are minted with the
+   * latest version, so only tokens issued before this call stop working.
+   */
+  private async revokeAllSessions(user: User): Promise<void> {
+    const nextVersion = (user.authVersion ?? 0) + 1;
+    user.authVersion = nextVersion;
+    await this.dataSource.getRepository(User).save(user);
+
+    await this.cacheManager.set(
+      `auth_version:${user.id}`,
+      String(nextVersion),
+      CACHE_TTL_MS.REFRESH_TOKEN,
+    );
+    await this.revokeRefreshFamily(user.id);
+  }
+
   async register(
     { name, lastName, email, password, client }: RegisterDto,
     callbackUrl?: string,
   ) {
     this.assertAllowedClient(client);
 
-    const existingUser = await this.usersService.findOneByEmail(email);
+    const normalizedEmail = this.normalizeEmail(email);
+    const existingUser =
+      await this.usersService.findOneByEmailWithDeleted(normalizedEmail);
 
-    if (existingUser) {
+    if (existingUser && existingUser.deletedAt == null) {
       throw new ConflictException('User already exists');
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    const user = await this.usersService
-      .create({
-        name,
-        lastName,
-        email,
-        password: hashedPassword,
-        client,
-      })
-      .catch((error) => {
-        if (error?.code === '23505' || error?.driverError?.code === '23505') {
-          throw new ConflictException('User already exists');
-        }
-        throw error;
-      });
+    let user: User;
 
+    if (existingUser) {
+      await this.usersService.restore(existingUser.id);
+      existingUser.name = name;
+      existingUser.lastName = lastName;
+      existingUser.password = hashedPassword;
+      existingUser.provider = 'local';
+      existingUser.client = client;
+      existingUser.emailVerifiedAt = null;
+      user = await this.dataSource.getRepository(User).save(existingUser);
+    } else {
+      user = await this.usersService
+        .create({
+          name,
+          lastName,
+          email: normalizedEmail,
+          password: hashedPassword,
+          client,
+        })
+        .catch((error) => {
+          if (error?.code === '23505' || error?.driverError?.code === '23505') {
+            throw new ConflictException('User already exists');
+          }
+          throw error;
+        });
+    }
+
+    await this.sendVerificationEmail(normalizedEmail, callbackUrl);
+
+    return user;
+  }
+
+  private async sendVerificationEmail(
+    email: string,
+    callbackUrl?: string,
+  ): Promise<void> {
     const verifyToken = uuidv4();
     await this.cacheManager.set(
       `verify_token:${verifyToken}`,
@@ -102,14 +175,13 @@ export class AuthService {
         `Verification email could not be sent to ${email}: ${error.message}`,
       );
     }
-
-    return user;
   }
 
   async login({ email, password, client }: LoginDto) {
     this.assertAllowedClient(client);
 
-    const user = await this.usersService.findOneByEmail(email);
+    const normalizedEmail = this.normalizeEmail(email);
+    const user = await this.usersService.findOneByEmail(normalizedEmail);
     if (!user) {
       throw new UnauthorizedException('Invalid credentials');
     }
@@ -136,26 +208,11 @@ export class AuthService {
       throw new UnauthorizedException('Email not verified');
     }
 
-    const timestamp = Math.floor(Date.now() / 1000);
-    const jti = `${user.id}-${timestamp}-${uuidv4()}`;
-
-    const payload = {
-      email: user.email,
-      sub: user.id,
-      iss: 'auth waves',
-      aud: user.client,
-      nbf: timestamp,
-      jti: jti,
-    };
-
-    const token = await this.jwtService.signAsync(payload, {
-      keyid: this.jwtConfigService.kid,
-    });
-
+    const token = await this.signAccessToken(user);
     const refreshToken = await this.issueRefreshToken(user.id);
 
     return {
-      email,
+      email: user.email,
       token,
       refresh_token: refreshToken,
     };
@@ -200,22 +257,7 @@ export class AuthService {
       CACHE_TTL_MS.REFRESH_TOKEN,
     );
 
-    const timestamp = Math.floor(Date.now() / 1000);
-    const jti = `${user.id}-${timestamp}-${uuidv4()}`;
-
-    const payload = {
-      email: user.email,
-      sub: user.id,
-      iss: 'auth waves',
-      aud: user.client,
-      nbf: timestamp,
-      jti: jti,
-    };
-
-    const token = await this.jwtService.signAsync(payload, {
-      keyid: this.jwtConfigService.kid,
-    });
-
+    const token = await this.signAccessToken(user);
     const newRefreshToken = await this.issueRefreshToken(user.id);
 
     return {
@@ -236,6 +278,17 @@ export class AuthService {
     return { message: 'Logout successful' };
   }
 
+  async logoutAll(user: JwtPayload) {
+    const userEntity = await this.usersService.findOne(user.sub);
+    if (!userEntity) {
+      throw new BadRequestException('User not found');
+    }
+
+    await this.revokeAllSessions(userEntity);
+
+    return { message: 'All sessions have been revoked' };
+  }
+
   async deleteUser(id: number, userToken: JwtPayload) {
     const userActive = await this.usersService.findOne(id);
 
@@ -248,6 +301,8 @@ export class AuthService {
     if (userActive.id != userToken.sub) {
       throw new ForbiddenException('unauthorized token for this user');
     }
+
+    await this.revokeAllSessions(userActive);
 
     return this.usersService.remove(id);
   }
@@ -278,11 +333,62 @@ export class AuthService {
     return { message: 'Email verified successfully' };
   }
 
+  async resendVerificationEmail(
+    email: string,
+    callbackUrl?: string,
+  ): Promise<{ message: string }> {
+    const normalizedEmail = this.normalizeEmail(email);
+    const user = await this.usersService.findOneByEmail(normalizedEmail);
+
+    if (!user) {
+      return {
+        message: 'If the email exists, a verification link has been sent',
+      };
+    }
+
+    if (user.emailVerifiedAt) {
+      return { message: 'Email already verified' };
+    }
+
+    await this.sendVerificationEmail(normalizedEmail, callbackUrl);
+
+    return {
+      message: 'If the email exists, a verification link has been sent',
+    };
+  }
+
+  async changePassword(
+    userToken: JwtPayload,
+    currentPassword: string,
+    newPassword: string,
+  ): Promise<{ message: string }> {
+    const user = await this.usersService.findOne(userToken.sub);
+
+    if (!user || user.provider !== 'local') {
+      throw new UnauthorizedException('Invalid credentials');
+    }
+
+    const isPasswordValid = await bcrypt.compare(
+      currentPassword,
+      user.password,
+    );
+    if (!isPasswordValid) {
+      throw new UnauthorizedException('Invalid credentials');
+    }
+
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+    user.password = hashedPassword;
+    await this.revokeAllSessions(user);
+
+    return { message: 'Password changed successfully' };
+  }
+
   async forgotPassword(
     email: string,
     callbackUrl?: string,
   ): Promise<{ message: string }> {
-    const rateLimitKey = `forgot_rate:${email}`;
+    const normalizedEmail = this.normalizeEmail(email);
+    const rateLimitKey = `forgot_rate:${normalizedEmail}`;
     const recentRequest = await this.cacheManager.get(rateLimitKey);
 
     if (recentRequest) {
@@ -292,7 +398,7 @@ export class AuthService {
       );
     }
 
-    const user = await this.usersService.findOneByEmail(email);
+    const user = await this.usersService.findOneByEmail(normalizedEmail);
 
     if (!user) {
       return { message: 'If the email exists, a reset link has been sent' };
@@ -312,13 +418,13 @@ export class AuthService {
 
     await this.cacheManager.set(
       `reset_token:${resetToken}`,
-      email,
+      normalizedEmail,
       CACHE_TTL_MS.PASSWORD_RESET,
     );
 
     try {
       await this.mailClientService.sendPasswordResetEmail(
-        email,
+        normalizedEmail,
         resetToken,
         callbackUrl,
       );
@@ -354,14 +460,22 @@ export class AuthService {
 
     const hashedPassword = await bcrypt.hash(newPassword, 10);
     user.password = hashedPassword;
-    await this.dataSource.getRepository(User).save(user);
+    await this.revokeAllSessions(user);
 
     await this.cacheManager.del(`reset_token:${token}`);
 
     return { message: 'Password reset successful' };
   }
 
-  async googleLogin({ code, client }: { code: string; client: string }) {
+  async googleLogin({
+    code,
+    client,
+    redirect_uri,
+  }: {
+    code: string;
+    client: string;
+    redirect_uri?: string;
+  }) {
     this.assertAllowedClient(client);
 
     const tokenResponse = await firstValueFrom(
@@ -369,7 +483,7 @@ export class AuthService {
         code,
         client_id: this.configService.get<string>('GOOGLE_CLIENT_ID'),
         client_secret: this.configService.get<string>('GOOGLE_CLIENT_SECRET'),
-        redirect_uri: 'postmessage',
+        redirect_uri: redirect_uri || 'postmessage',
         grant_type: 'authorization_code',
       }),
     );
@@ -408,7 +522,8 @@ export class AuthService {
       throw new BadRequestException('Google account email is not verified');
     }
 
-    let user = await this.usersService.findOneByEmail(googleEmail);
+    const normalizedEmail = this.normalizeEmail(googleEmail);
+    let user = await this.usersService.findOneByEmail(normalizedEmail);
 
     if (user) {
       if (user.provider !== 'google') {
@@ -423,7 +538,7 @@ export class AuthService {
       user = await this.usersService.create({
         name: givenName || '',
         lastName: familyName || '',
-        email: googleEmail,
+        email: normalizedEmail,
         password: null,
         client,
         provider: 'google',
@@ -431,22 +546,7 @@ export class AuthService {
       });
     }
 
-    const timestamp = Math.floor(Date.now() / 1000);
-    const jti = `${user.id}-${timestamp}-${uuidv4()}`;
-
-    const jwtPayload = {
-      email: user.email,
-      sub: user.id,
-      iss: 'auth waves',
-      aud: user.client,
-      nbf: timestamp,
-      jti: jti,
-    };
-
-    const token = await this.jwtService.signAsync(jwtPayload, {
-      keyid: this.jwtConfigService.kid,
-    });
-
+    const token = await this.signAccessToken(user);
     const refreshToken = await this.issueRefreshToken(user.id);
 
     return {

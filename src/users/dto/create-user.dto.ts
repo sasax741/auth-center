@@ -6,4 +6,5 @@ export class CreateUserDto {
   client: string;
   provider?: string;
   emailVerifiedAt?: Date;
+  authVersion?: number;
 }

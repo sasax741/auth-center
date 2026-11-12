@@ -12,6 +12,9 @@ const validEnv = {
   DB_NAME: 'auth',
   REDIS_HOST: 'localhost',
   ALLOWED_CLIENTS: 'web,mobile',
+  JWT_PRIVATE_KEY: 'private',
+  JWT_PUBLIC_KEY: 'public',
+  JWT_KID: 'kid',
 };
 
 describe('validateEnv', () => {
@@ -31,7 +34,7 @@ describe('validateEnv', () => {
 
   it('lists every missing key at once', () => {
     expect(() => validateEnv({})).toThrow(
-      /DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME, ALLOWED_CLIENTS/,
+      /DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME, ALLOWED_CLIENTS, JWT_PRIVATE_KEY, JWT_PUBLIC_KEY, JWT_KID/,
     );
   });
 

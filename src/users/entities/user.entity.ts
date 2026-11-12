@@ -36,6 +36,9 @@ export class User {
   @Column()
   client: string;
 
+  @Column({ default: 0 })
+  authVersion: number;
+
   @CreateDateColumn()
   createdAt: Date;
 

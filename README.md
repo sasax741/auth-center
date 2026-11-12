@@ -15,7 +15,8 @@ Microservicio de autenticación construido con NestJS que emite tokens JWT firma
 | OAuth       | Google (Authorization Code)               |
 | Contenedores | Imagen Docker (Swarm) + Compose para desarrollo local |
 | Seguridad HTTP | helmet + límite de body + allow list de clientes |
-| Rate Limiting | @nestjs/throttler (3 niveles)           |
+| Rate Limiting | @nestjs/throttler (3 niveles, almacenamiento distribuido en Redis) |
+| Sesiones | authVersion + soft-delete + logout-all (invalidación de todas las sesiones) |
 | Tracing     | Correlation ID + AsyncLocalStorage        |
 
 ---
@@ -86,11 +87,16 @@ Todos los endpoints operativos están prefijados con `/api/v1`.
 | `POST`  | `/auth/google`                   | Autentica con Google (Authorization Code) + crea usuario si no existe. Devuelve JWT + refresh_token | No   | 5 req/min      |
 | `POST`  | `/auth/refresh`                  | Canjea refresh token por nuevo access token + nuevo refresh token (rotación) | No   | 10 req/min     |
 | `POST`  | `/auth/logout`                   | Revoca el token actual (agrega jti a Redis blacklist)                       | Sí   | Global         |
+| `POST`  | `/auth/logout-all`               | Revoca todas las sesiones del usuario (incrementa `authVersion`)            | Sí   | Global         |
 | `POST`  | `/auth/verify-email`             | Verifica el email con token recibido por correo                             | No   | 5 req/min      |
+| `POST`  | `/auth/resend-verification`      | Reenvía el email de verificación (usuario no verificado)                    | No   | 5 req/min      |
+| `POST`  | `/auth/change-password`          | Cambia la contraseña y revoca todas las sesiones                            | Sí   | Global         |
 | `DELETE`| `/auth/deleteUser/:id`           | Soft-delete de usuario (solo el propio dueño)                               | Sí   | 5 req/min      |
 | `POST`  | `/auth/forgot-password`          | Envía email con token para resetear contraseña (rate limit por email)       | No   | 3 req/min      |
 | `POST`  | `/auth/reset-password`           | Resetea la contraseña con el token recibido por correo                      | No   | 3 req/min      |
 | `GET`   | `/users`                         | Lista usuarios (paginado: `?page=1&limit=10`)                               | Sí   | Global         |
+| `GET`   | `/users/me`                      | Obtiene el usuario autenticado                                              | Sí   | Global         |
+| `PATCH` | `/users/me`                      | Actualiza el perfil del usuario autenticado                                 | Sí   | Global         |
 | `GET`   | `/users/:id`                     | Obtiene un usuario por ID                                                   | Sí   | Global         |
 | `GET`   | `/health`                        | Health check con ping a PostgreSQL y Redis                                  | No   | Global         |
 | `GET`   | `/.well-known/jwks.json`         | Clave pública en formato JWKS (ruta absoluta, sin prefijo)                  | No   | Global         |
@@ -185,6 +191,7 @@ sequenceDiagram
 | `iat` | Emitido en                                |
 | `nbf` | Válido desde                              |
 | `exp` | Expira en (1 día por defecto)              |
+| `authVersion` | Versión de sesión: si es menor a la actual, el token se rechaza (logout-all / cambio de contraseña) |
 
 ---
 
@@ -201,14 +208,19 @@ flowchart TD
     Expired -->|No| Blacklist{Consultar Redis:<br>jti en blacklist?}
 
     Blacklist -->|jti encontrado| DenyRev[401 Unauthorized<br>Token revocado]
-    Blacklist -->|jti no encontrado| Allow[Permitir request<br>→ Controller]
+    Blacklist -->|jti no encontrado| AuthVersion{¿authVersion<br>vigente?}
+
+    AuthVersion -->|No| DenyVersion[401 Unauthorized<br>Sesión invalidada]
+    AuthVersion -->|Sí| Allow[Permitir request<br>→ Controller]
 
     DenyExp --> Response[Respuesta JSON error]
     DenyRev --> Response
+    DenyVersion --> Response
 
     style Allow fill:#b2f2bb,stroke:#2f9e44,color:#2f9e44
     style DenyExp fill:#ffc9c9,stroke:#e03131,color:#e03131
     style DenyRev fill:#ffc9c9,stroke:#e03131,color:#e03131
+    style DenyVersion fill:#ffc9c9,stroke:#e03131,color:#e03131
     style Verify fill:#ffec99,stroke:#e67700,color:#e67700
     style Expired fill:#ffec99,stroke:#e67700,color:#e67700
     style Blacklist fill:#ffec99,stroke:#e67700,color:#e67700
@@ -231,6 +243,7 @@ El login devuelve un `refresh_token` además del access token JWT:
 - **Rotación**: al usar un refresh token, se invalida el anterior y se genera uno nuevo
 - **Detección de reuso**: el token rotado queda marcado. Si se presenta otra vez (robo), se revoca toda la familia de refresh tokens de esa cuenta y el usuario debe loguearse de nuevo
 - El endpoint `POST /auth/logout` revoca solo el access token actual; para logout completo descartar el refresh token del lado del cliente
+- El endpoint `POST /auth/logout-all` incrementa `authVersion` y revoca la familia de refresh tokens, invalidando **todas** las sesiones activas del usuario
 
 ---
 
@@ -244,7 +257,13 @@ Al registrarse, el usuario recibe un email con un token de verificación. El log
 POST /auth/register → email con token de verificación → POST /auth/verify-email { token }
 ```
 
-El token expira en **24 horas**. Si no se verifica, se puede reenviar un nuevo token... (pendiente).
+El token expira en **24 horas**. Si no se verifica, se puede reenviar un nuevo token con `POST /auth/resend-verification`:
+
+```json
+{ "email": "user@example.com", "callback_url": "https://miapp.com/verify" }
+```
+
+Este endpoint responde de forma genérica (no revela si el email existe) y no reenvía si el email ya está verificado.
 
 ---
 
@@ -360,6 +379,12 @@ Esto permite rastrear una petición completa a través de múltiples servicios e
 
 ## Rate Limiting
 
+El throttler usa **almacenamiento distribuido en Redis** (`RedisThrottlerStorage`), por lo que los límites se comparten entre todas las réplicas del servicio (no hay estado en memoria). Para que el `X-Forwarded-For` se respete detrás de un proxy/load balancer, configura `TRUST_PROXY`:
+
+```env
+TRUST_PROXY=1          # número de hops de confianza, o una subred/host (lo que acepta Express 'trust proxy')
+```
+
 Tres niveles configurados globalmente:
 
 | Nivel    | Límite              | Ventana |
@@ -393,8 +418,11 @@ El endpoint `forgot-password` también tiene un **rate limit adicional por email
 | **Headers**                | `helmet` en todas las respuestas (incluye `X-Content-Type-Options`, `X-Frame-Options`, HSTS). `X-Powered-By` no se envía |
 | **Límite de body**         | 100 KB por defecto, configurable con `BODY_LIMIT`. Un body mayor responde 413 |
 | **CORS**                   | Deshabilitado salvo que definas `CORS_ORIGINS` (lista separada por comas); con valor, se habilita solo para esos orígenes |
+| **Trust proxy**            | `TRUST_PROXY` configura Express para respetar `X-Forwarded-For` detrás de un proxy; crítico para que el rate limiting use la IP real del cliente |
 | **Configuración JWT**      | El servicio falla al arrancar si falta `JWT_PRIVATE_KEY`, `JWT_PUBLIC_KEY` o `JWT_KID`, o si la clave pública no se puede publicar como JWKS |
-| **Contraseñas**            | Nunca se devuelven: la entity excluye el campo y `register` solo expone datos públicos |
+| **Contraseñas**            | Nunca se devuelven: la entity excluye el campo y el serializer global lo omite |
+| **Normalización de entrada** | Los emails se recortan y se pasan a minúsculas; los DTOs validan longitud y contenido antes de persistir |
+| **Sesiones**               | `logout-all`, cambio de contraseña, reset y soft-delete incrementan `authVersion`, invalidando tokens y refresh tokens previos |
 | **Google**                 | Solo se aceptan identidades con `email_verified` en el token de Google |
 
 Los errores no esperados nunca exponen su mensaje interno: el filtro global responde 500 genérico, mientras que los errores de cliente (body demasiado grande, JSON malformado) conservan su status real (413/400).
@@ -474,6 +502,7 @@ NODE_ENV=development
 ALLOWED_CLIENTS=web,mobile   # (requerida) clientes habilitados, separados por coma
 # CORS_ORIGINS=https://app.example.com,https://admin.example.com
 # BODY_LIMIT=100kb
+# TRUST_PROXY=1              # respeta X-Forwarded-For detrás de un proxy
 
 # Mail Service
 MAIL_SERVICE_URL=http://mail:8080
@@ -490,36 +519,37 @@ GOOGLE_CLIENT_SECRET=GOCSPX-xxxxxxxxxxxx
 ```
 src/
 ├── auth/                  # Módulo de autenticación
-│   ├── auth.controller.ts    # register, login, refresh, logout, verify-email, deleteUser, forgot/reset-password
-│   ├── auth.service.ts       # Lógica de negocio + refresh tokens + reuse detection + verificación email
+│   ├── auth.controller.ts    # register, login, refresh, logout, logout-all, verify/resend-email, change-password, deleteUser, forgot/reset-password, google
+│   ├── auth.service.ts       # Lógica de negocio + refresh tokens + reuse detection + verificación email + authVersion
 │   ├── jwks.service.ts       # Construye el JWKS una vez al arrancar (fail-fast)
 │   ├── well-known.controller.ts  # GET /.well-known/jwks.json
-│   ├── guard/auth.guard.ts   # Validación JWT + blacklist Redis
+│   ├── guard/auth.guard.ts   # Validación JWT + blacklist Redis + authVersion
 │   ├── decorators/           # @GetUser() decorator
-│   ├── dto/                  # register, login, forgot-password, reset-password, refresh-token, verify-email, google-login
+│   ├── dto/                  # register, login, forgot-password, reset-password, refresh-token, verify-email, google-login, resend-verification, change-password
 │   └── constants/            # JwtConfigService (claves PEM) + TTLs del cache
 ├── users/                 # Módulo de usuarios
-│   ├── users.controller.ts   # CRUD protegido (paginado, aislado por cliente)
-│   ├── users.service.ts      # find, remove (soft-delete)
-│   ├── dto/pagination.dto.ts # page/limit con tope
-│   └── entities/user.entity.ts  # TypeORM entity (provider, emailVerifiedAt, índice client+email)
+│   ├── users.controller.ts   # CRUD protegido (paginado, aislado por cliente) + me (GET/PATCH)
+│   ├── users.service.ts      # find, remove (soft-delete), restore, update
+│   ├── dto/                  # pagination, create-user, update-user, update-me
+│   └── entities/user.entity.ts  # TypeORM entity (provider, emailVerifiedAt, authVersion, índice client+email, soft-delete)
 ├── mail/                  # Cliente HTTP para Mail Service externo
 │   ├── mail-client.module.ts
 │   └── mail-client.service.ts  # sendPasswordResetEmail, sendVerificationEmail
-├── config/                # validateEnv (validación de entorno al arrancar)
+├── config/                # validateEnv (validación de entorno al arrancar) + redis-connection + redis-throttler-storage
 ├── migrations/            # Migraciones TypeORM
 │   ├── 1758608433133-InitialSchema.ts
 │   ├── 1758608433134-FixDaletedAtTypo.ts
 │   ├── 1758608433135-AddProviderAndNullablePassword.ts
 │   ├── 1758608433136-AddEmailVerifiedAt.ts
-│   └── 1758608433137-AddClientEmailIndex.ts
+│   ├── 1758608433137-AddClientEmailIndex.ts
+│   └── 1758610000000-AddAuthVersion.ts
 ├── middleware/             # CorrelationIdMiddleware
 ├── request-context/       # AsyncLocalStorage wrapper
 ├── logger/                # CustomLogger con correlation ID
 ├── interceptors/          # LoggingInterceptor
 ├── filters/               # AllExceptionsFilter (global)
 ├── health/                # HealthController (Terminus) + RedisHealthIndicator
-├── app.setup.ts           # helmet, CORS, límite de body, pipes y prefijo global
+├── app.setup.ts           # helmet, CORS, límite de body, trust proxy, pipes y prefijo global
 └── interfaces/            # JwtPayload interface
 ```
 

@@ -39,6 +39,19 @@ export class AuthGuard implements CanActivate {
         throw new UnauthorizedException('Token has been revoked');
       }
 
+      // When the session version is cached (after a revokeAllSessions call),
+      // reject tokens minted before the revocation. The cache is authoritative;
+      // when it is absent we trust the signed claim to avoid a DB hit per call.
+      const latestVersion = await this.cacheManager.get<string>(
+        `auth_version:${payload.sub}`,
+      );
+      if (latestVersion) {
+        const tokenVersion = payload.authVersion ?? 0;
+        if (tokenVersion < Number(latestVersion)) {
+          throw new UnauthorizedException('Token is no longer valid');
+        }
+      }
+
       request['user'] = payload;
     } catch (e) {
       throw new UnauthorizedException(e.message || 'Unknown token error');

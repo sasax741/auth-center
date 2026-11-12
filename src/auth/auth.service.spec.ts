@@ -78,9 +78,13 @@ describe('AuthService', () => {
   let cache: FakeCache;
   let usersService: {
     findOneByEmail: jest.Mock;
+    findOneByEmailWithDeleted: jest.Mock;
     findOne: jest.Mock;
     create: jest.Mock;
     remove: jest.Mock;
+    restore: jest.Mock;
+    count: jest.Mock;
+    update: jest.Mock;
   };
   let jwtService: { signAsync: jest.Mock };
   let mailClientService: {
@@ -101,9 +105,13 @@ describe('AuthService', () => {
     cache = new FakeCache();
     usersService = {
       findOneByEmail: jest.fn(),
+      findOneByEmailWithDeleted: jest.fn(async () => null),
       findOne: jest.fn(),
       create: jest.fn(async (dto) => buildUser(dto)),
       remove: jest.fn(),
+      restore: jest.fn(async () => undefined),
+      count: jest.fn(async () => 0),
+      update: jest.fn(async () => undefined),
     };
     jwtService = { signAsync: jest.fn(async () => 'signed.jwt.token') };
     mailClientService = {
@@ -159,7 +167,7 @@ describe('AuthService', () => {
     };
 
     it('stores a verification token for 24 hours in milliseconds', async () => {
-      usersService.findOneByEmail.mockResolvedValue(null);
+      usersService.findOneByEmailWithDeleted.mockResolvedValue(null);
 
       await service.register(dto);
 
@@ -172,7 +180,7 @@ describe('AuthService', () => {
     });
 
     it('hashes the password before persisting it', async () => {
-      usersService.findOneByEmail.mockResolvedValue(null);
+      usersService.findOneByEmailWithDeleted.mockResolvedValue(null);
 
       await service.register(dto);
 
@@ -183,7 +191,7 @@ describe('AuthService', () => {
     });
 
     it('rejects a duplicate email with a conflict', async () => {
-      usersService.findOneByEmail.mockResolvedValue(buildUser());
+      usersService.findOneByEmailWithDeleted.mockResolvedValue(buildUser());
 
       await expect(service.register(dto)).rejects.toBeInstanceOf(
         ConflictException,
@@ -191,7 +199,7 @@ describe('AuthService', () => {
     });
 
     it('maps a unique violation raised during insert to a conflict', async () => {
-      usersService.findOneByEmail.mockResolvedValue(null);
+      usersService.findOneByEmailWithDeleted.mockResolvedValue(null);
       usersService.create.mockRejectedValue(
         Object.assign(new Error('duplicate key'), { code: '23505' }),
       );
@@ -222,8 +230,8 @@ describe('AuthService', () => {
       }
     });
 
-    it('still returns the created user when the verification email fails', async () => {
-      usersService.findOneByEmail.mockResolvedValue(null);
+    it('still registers the user when the verification email fails', async () => {
+      usersService.findOneByEmailWithDeleted.mockResolvedValue(null);
       mailClientService.sendVerificationEmail.mockRejectedValue(
         new Error('mail down'),
       );
@@ -231,6 +239,7 @@ describe('AuthService', () => {
       await expect(service.register(dto)).resolves.toEqual(
         expect.objectContaining({ email: 'ada@example.com' }),
       );
+      expect(usersService.create).toHaveBeenCalled();
     });
   });
 
