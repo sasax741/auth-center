@@ -80,7 +80,10 @@ jobs:
           REDIS_HOST: localhost
           REDIS_PORT: 6379
           ALLOWED_CLIENTS: web,mobile
-          JWT_PRIVATE_KEY: ${{ secrets.JWT_PRIVATE_KEY }}
-          JWT_PUBLIC_KEY: ${{ secrets.JWT_PUBLIC_KEY }}
-          JWT_KID: ${{ secrets.JWT_KID }}
-        run: pnpm test:e2e
+        run: |
+          openssl genrsa -out /tmp/private.pem 2048
+          openssl rsa -in /tmp/private.pem -pubout -out /tmp/public.pem
+          export JWT_PRIVATE_KEY="$(cat /tmp/private.pem)"
+          export JWT_PUBLIC_KEY="$(cat /tmp/public.pem)"
+          export JWT_KID="ci-test-key"
+          pnpm test:e2e

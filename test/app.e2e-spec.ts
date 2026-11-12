@@ -181,7 +181,7 @@ describe('Authentication service (e2e)', () => {
       .set('Authorization', `Bearer ${accessToken}`)
       .expect(200);
 
-    expect(response.body).toEqual(
+    expect(response.body.items).toEqual(
       expect.arrayContaining([expect.objectContaining({ email: webEmail })]),
     );
     expect(JSON.stringify(response.body)).not.toContain('password');
@@ -284,7 +284,11 @@ describe('Authentication service (e2e)', () => {
     await api()
       .post(`/${GLOBAL_PREFIX}/auth/login`)
       .send({ email: webEmail, password: newPassword, client: 'web' })
-      .expect(201);
+      .expect(201)
+      .then((res) => {
+        accessToken = res.body.token;
+        refreshToken = res.body.refresh_token;
+      });
   });
 
   it('answers generically for an unknown account without sending mail', async () => {
