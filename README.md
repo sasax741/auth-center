@@ -343,6 +343,13 @@ Este servicio no envía emails directamente. Delega en un **Mail Service externo
 
 Configurable vía `MAIL_SERVICE_URL=http://mail:8080`.
 
+### Contrato de integración
+
+- **Remitente**: el auth service **no** envía `from`; lo toma el mail service desde `FROM_ADDRESS` (server-side).
+- **Idempotencia**: cada email se envía con el header `Idempotency-Key`, derivado del token correspondiente (`password-reset:<token>` o `verify-email:<token>`). Si se reintenta una petición con la misma key y payload, el mail service no reenvía el email.
+- **Timeout**: el `HttpModule` usa `MAIL_SERVICE_TIMEOUT` (ms, default `90000`), alineado al presupuesto máximo de latencia del mail service (`SMTP_TIMEOUT × SMTP_MAX_ATTEMPTS` + backoff). Si el SMTP se demora, el auth service no corta la petición antes de que termine la entrega.
+- **`MAIL_SERVICE_URL` por entorno**: en red interna/Swarm usar `http://mail:8080` (nombre del servicio); solo en desarrollo local usar `http://localhost:8080`.
+
 ---
 
 ## JWT RS256 (Firma Asimétrica)
@@ -506,6 +513,7 @@ ALLOWED_CLIENTS=web,mobile   # (requerida) clientes habilitados, separados por c
 
 # Mail Service
 MAIL_SERVICE_URL=http://mail:8080
+# MAIL_SERVICE_TIMEOUT=90000
 
 # Google OAuth
 GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com

@@ -43,14 +43,13 @@ export class MailClientService {
       `;
     }
 
-    await firstValueFrom(
-      this.httpService.post(`${this.mailServiceUrl}/api/send`, {
-        to: [to],
-        subject: 'Password Reset',
-        body,
-        is_html: true,
-      }),
-    );
+    await this.post({
+      to: [to],
+      subject: 'Password Reset',
+      body,
+      is_html: true,
+      idempotencyKey: `password-reset:${resetToken}`,
+    });
   }
 
   async sendVerificationEmail(
@@ -81,12 +80,27 @@ export class MailClientService {
       `;
     }
 
+    await this.post({
+      to: [to],
+      subject: 'Verify Your Email',
+      body,
+      is_html: true,
+      idempotencyKey: `verify-email:${verifyToken}`,
+    });
+  }
+
+  private async post(payload: {
+    to: string[];
+    subject: string;
+    body: string;
+    is_html: boolean;
+    idempotencyKey: string;
+  }): Promise<void> {
+    const { idempotencyKey, ...body } = payload;
+
     await firstValueFrom(
-      this.httpService.post(`${this.mailServiceUrl}/api/send`, {
-        to: [to],
-        subject: 'Verify Your Email',
-        body,
-        is_html: true,
+      this.httpService.post(`${this.mailServiceUrl}/api/send`, body, {
+        headers: { 'Idempotency-Key': idempotencyKey },
       }),
     );
   }
