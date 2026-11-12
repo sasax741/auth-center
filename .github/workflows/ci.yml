@@ -83,13 +83,7 @@ jobs:
         run: |
           openssl genrsa -out /tmp/private.pem 2048
           openssl rsa -in /tmp/private.pem -pubout -out /tmp/public.pem
-          {
-            echo "JWT_PRIVATE_KEY<<EOF"
-            cat /tmp/private.pem
-            echo "EOF"
-            echo "JWT_PUBLIC_KEY<<EOF"
-            cat /tmp/public.pem
-            echo "EOF"
-            echo "JWT_KID=ci-test-key"
-          } >> "$GITHUB_ENV"
+          export JWT_PRIVATE_KEY="$(cat /tmp/private.pem)"
+          export JWT_PUBLIC_KEY="$(cat /tmp/public.pem)"
+          export JWT_KID="ci-test-key"
           pnpm test:e2e
