@@ -13,7 +13,7 @@ import { MailClientService } from './mail-client.service';
         const timeoutMs = timeout ? Number(timeout) : NaN;
         return {
           timeout:
-            Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 90000,
+            Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 45000,
           maxRedirects: 3,
         };
       },
